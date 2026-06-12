@@ -58,6 +58,8 @@ def build_state() -> dict:
     records = []           # 已赛比赛的事前预测 vs 实际
     n_outcome_hit = n_score_hit = 0
     brier_sum = 0.0
+    brier_base_sum = 0.0   # 反事实基线：若无 Fable 微调，纯引擎+市场的误差
+    n_adjusted = 0
 
     for m in played:
         home, away = by_code[m["home"]], by_code[m["away"]]
@@ -76,6 +78,23 @@ def build_state() -> dict:
         n_score_hit += score_hit
         brier_sum += sum((probs[o] - (1.0 if o == actual else 0.0)) ** 2
                          for o in "HDA")
+
+        # Fable 微调过的场次：再按反事实基线计一遍误差，量化主观判断的增益
+        fable = lk.get("fable") if lk else None
+        base = None
+        if fable and lk.get("we_base") is not None:
+            n_adjusted += 1
+            pred_b = match_probabilities(home, away, knockout=ko,
+                                         we_override=lk["we_base"])
+            probs_b = {"H": pred_b["p_win"], "D": pred_b["p_draw"],
+                       "A": pred_b["p_loss"]}
+            base = {k: round(v, 4) for k, v in
+                    zip(("p_home", "p_draw", "p_away"),
+                        (probs_b["H"], probs_b["D"], probs_b["A"]))}
+        else:
+            probs_b = probs
+        brier_base_sum += sum((probs_b[o] - (1.0 if o == actual else 0.0)) ** 2
+                              for o in "HDA")
 
         records.append({
             "match": m["match"], "stage": m["stage"], "date_utc": m["date_utc"],
@@ -96,6 +115,8 @@ def build_state() -> dict:
             "elo_away_before": round(away["elo"], 1),
             "outcome_hit": outcome_hit,
             "score_hit": score_hit,
+            "fable": fable,
+            "base": base,
         })
 
         elo_h_before, elo_a_before = home["elo"], away["elo"]
@@ -117,6 +138,7 @@ def build_state() -> dict:
     from datetime import datetime, timezone
     now_utc = datetime.now(timezone.utc)
     odds_cache = odds.load() or {}
+    fable_adj = db.fable_adjusts()
     h2h = odds_cache.get("h2h", {})
     we_overrides = {}
     for m in matches:
@@ -131,17 +153,28 @@ def build_state() -> dict:
                 we_overrides[(m["home"], m["away"])] = lk["we"]
             continue
         mkt = h2h.get(f"{m['home']}|{m['away']}")
-        if mkt:
+        fa = fable_adj.get(m["match"])
+        if mkt or fa:
             home, away = by_code[m["home"]], by_code[m["away"]]
             we_model = win_expectancy(effective_elo(home), effective_elo(away))
-            we_mkt = mkt["p_home"] + 0.5 * mkt["p_draw"]
-            we_blend = round(MODEL_WEIGHT * we_model
-                             + (1 - MODEL_WEIGHT) * we_mkt, 4)
+            # Fable 主观微调：情报驱动的有界扰动——先调引擎，再融市场，
+            # 市场权重天然制衡；无微调的基线值同存，赛后双线对账
+            we_adj = (min(max(we_model + fa["delta"] / 100.0, 0.05), 0.95)
+                      if fa else we_model)
+            if mkt:
+                we_mkt = mkt["p_home"] + 0.5 * mkt["p_draw"]
+                we_blend = round(MODEL_WEIGHT * we_adj
+                                 + (1 - MODEL_WEIGHT) * we_mkt, 4)
+                we_base = round(MODEL_WEIGHT * we_model
+                                + (1 - MODEL_WEIGHT) * we_mkt, 4)
+            else:
+                we_blend, we_base = round(we_adj, 4), round(we_model, 4)
+            fable = ({"delta": fa["delta"], "note": fa["note"]} if fa else None)
             locked[str(m["match"])] = {
-                "we": we_blend, "market": mkt,
-                "ts": time.strftime("%Y-%m-%d %H:%M"),
+                "we": we_blend, "we_base": we_base, "market": mkt,
+                "fable": fable, "ts": time.strftime("%Y-%m-%d %H:%M"),
             }
-            db.save_lock(m["match"], we_blend, mkt)
+            db.save_lock(m["match"], we_blend, mkt, we_base, fable)
         lk = locked.get(str(m["match"]))
         if lk:
             we_overrides[(m["home"], m["away"])] = lk["we"]
@@ -201,5 +234,7 @@ def build_state() -> dict:
             "outcome_acc": round(n_outcome_hit / n, 4) if n else None,
             "score_acc": round(n_score_hit / n, 4) if n else None,
             "brier": round(brier_sum / n, 4) if n else None,
+            "brier_base": round(brier_base_sum / n, 4) if n else None,
+            "n_adjusted": n_adjusted,
         },
     }

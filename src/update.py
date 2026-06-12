@@ -164,7 +164,9 @@ def build_schedule(state: dict) -> list[dict]:
                            "top_scores": rec["top_scores"],
                            "grid": rec["grid"],
                            "p_actual_score": rec["p_actual_score"],
-                           "market": rec["market"]}
+                           "market": rec["market"],
+                           "fable": rec.get("fable"),
+                           "base": rec.get("base")}
             row["outcome_hit"] = rec["outcome_hit"]
             row["score_hit"] = rec["score_hit"]
         elif m["home"] and m["away"] and not m["score"]:  # 未赛但对阵已知
@@ -184,6 +186,14 @@ def build_schedule(state: dict) -> list[dict]:
                 "grid": score_grid(home, away, we_override=we_o),
                 "market": lk["market"] if lk else None,
             }
+            fable = lk.get("fable") if lk else None
+            if fable and lk.get("we_base") is not None:
+                pred_b = match_probabilities(home, away, knockout=ko,
+                                             we_override=lk["we_base"])
+                row["pred"]["fable"] = fable
+                row["pred"]["base"] = {"p_home": round(pred_b["p_win"], 4),
+                                       "p_draw": round(pred_b["p_draw"], 4),
+                                       "p_away": round(pred_b["p_loss"], 4)}
             if ko:
                 row["pred"]["p_adv_home"] = round(pred["p_advance_a"], 4)
                 row["pred"]["p_adv_away"] = round(pred["p_advance_b"], 4)
@@ -223,9 +233,14 @@ def print_report(payload: dict) -> None:
           f"  ·  更新于 {payload['meta']['updated_at']}")
     print("=" * 78)
     if stats["n"]:
+        fable_note = ""
+        if stats.get("n_adjusted"):
+            fable_note = (f" | 纯引擎 Brier {stats['brier_base']:.3f}"
+                          f"（Fable 微调 {stats['n_adjusted']} 场）")
         print(f"  预测战绩: 胜平负命中 {stats['outcome_acc'] * 100:.0f}%"
               f" | 精确比分命中 {stats['score_acc'] * 100:.0f}%"
-              f" | Brier {stats['brier']:.3f}  (共 {stats['n']} 场)")
+              f" | Brier {stats['brier']:.3f}  (共 {stats['n']} 场)"
+              + fable_note)
         print("-" * 78)
     print(f"  {'球队':　<8}{'组':>2}  {'Elo':>6}" + "".join(
         f"{STAGE_ZH[s]:>10}" for s in STAGES))

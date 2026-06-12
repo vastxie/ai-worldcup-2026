@@ -45,6 +45,13 @@ CREATE TABLE IF NOT EXISTS locks (    -- 赛前锁档（开球后只读）
   ts       TEXT
 );
 
+CREATE TABLE IF NOT EXISTS fable_adjust (  -- Fable 主观微调（情报驱动的有界扰动）
+  match_no INTEGER PRIMARY KEY,
+  delta    REAL NOT NULL,             -- 主队胜负期望调整，百分点（±cap 以内）
+  note     TEXT NOT NULL,             -- 一句话理由，公开展示
+  ts       TEXT
+);
+
 CREATE TABLE IF NOT EXISTS elo_history (
   id        INTEGER PRIMARY KEY AUTOINCREMENT,
   match_no  INTEGER NOT NULL,
@@ -180,6 +187,11 @@ def init_db(conn: sqlite3.Connection | None = None) -> None:
         conn.execute("ALTER TABLE agent_posts ADD COLUMN reply_to INTEGER")
     except sqlite3.OperationalError:
         pass
+    for col in ("we_base REAL", "fable_delta REAL", "fable_note TEXT"):
+        try:  # 增量迁移：锁档存反事实基线（无 Fable 微调的纯引擎+市场值）
+            conn.execute(f"ALTER TABLE locks ADD COLUMN {col}")
+        except sqlite3.OperationalError:
+            pass
     conn.commit()
     if own:
         conn.close()
@@ -281,24 +293,62 @@ def load_locks(conn: sqlite3.Connection | None = None) -> dict:
         market = (None if r["mkt_home"] is None else
                   {"p_home": r["mkt_home"], "p_draw": r["mkt_draw"],
                    "p_away": r["mkt_away"], "books": r["books"]})
-        out[str(r["match_no"])] = {"we": r["we"], "market": market,
-                                   "ts": r["ts"]}
+        keys = r.keys()
+        fable = None
+        if "fable_delta" in keys and r["fable_delta"] is not None:
+            fable = {"delta": r["fable_delta"], "note": r["fable_note"] or ""}
+        out[str(r["match_no"])] = {
+            "we": r["we"], "market": market, "ts": r["ts"],
+            "we_base": (r["we_base"] if "we_base" in keys else None),
+            "fable": fable,
+        }
     return out
 
 
-def save_lock(match_no: int, we: float, market: dict | None) -> None:
+def save_lock(match_no: int, we: float, market: dict | None,
+              we_base: float | None = None,
+              fable: dict | None = None) -> None:
     with transaction() as conn:
         conn.execute("""
-            INSERT INTO locks (match_no, we, mkt_home, mkt_draw, mkt_away, books, ts)
-            VALUES (?,?,?,?,?,?,?)
+            INSERT INTO locks (match_no, we, mkt_home, mkt_draw, mkt_away,
+                               books, ts, we_base, fable_delta, fable_note)
+            VALUES (?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(match_no) DO UPDATE SET
               we=excluded.we, mkt_home=excluded.mkt_home,
               mkt_draw=excluded.mkt_draw, mkt_away=excluded.mkt_away,
-              books=excluded.books, ts=excluded.ts
+              books=excluded.books, ts=excluded.ts,
+              we_base=excluded.we_base, fable_delta=excluded.fable_delta,
+              fable_note=excluded.fable_note
         """, (match_no, we,
               market and market.get("p_home"), market and market.get("p_draw"),
               market and market.get("p_away"), market and market.get("books"),
-              now()))
+              now(), we_base,
+              fable and fable.get("delta"), fable and fable.get("note")))
+
+
+# ------------------------------------------------------- Fable 主观微调 --
+
+def fable_adjust_set(match_no: int, delta: float, note: str) -> None:
+    with transaction() as conn:
+        conn.execute("""INSERT INTO fable_adjust (match_no, delta, note, ts)
+                        VALUES (?,?,?,?)
+                        ON CONFLICT(match_no) DO UPDATE SET
+                          delta=excluded.delta, note=excluded.note,
+                          ts=excluded.ts""",
+                     (match_no, delta, note, now()))
+
+
+def fable_adjust_clear(match_no: int) -> None:
+    with transaction() as conn:
+        conn.execute("DELETE FROM fable_adjust WHERE match_no=?", (match_no,))
+
+
+def fable_adjusts() -> dict[int, dict]:
+    conn = connect()
+    rows = conn.execute("SELECT * FROM fable_adjust").fetchall()
+    conn.close()
+    return {r["match_no"]: {"delta": r["delta"], "note": r["note"],
+                            "ts": r["ts"]} for r in rows}
 
 
 def delete_lock(match_no: int) -> None:

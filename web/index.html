@@ -469,6 +469,10 @@
     display: inline-flex; align-items: center; justify-content: center;
     padding: 2px; font-size: 10px; position: relative; }
   .card-bets .cb-svg svg { width: 100%; height: 100%; }
+  .fable-tag { font-family: var(--mono); font-size: 10px; color: var(--gold);
+    border: 1px solid rgba(255,215,94,.4); border-radius: 2px;
+    padding: 1px 5px; margin-left: 7px; white-space: nowrap; }
+  .fable-line { border-left: 2px solid var(--gold); padding-left: 10px; }
   .card-bets .cb-svg img { width: 100%; height: 100%; border-radius: 50%; }
   .card-bets .cb-card { display: none; position: absolute; bottom: calc(100% + 8px);
     left: 50%; transform: translateX(-50%); width: max-content; max-width: 250px;
@@ -959,6 +963,7 @@
           <div class="hit-badges">
             <span class="hit ${m.outcome_hit ? "yes" : "no"}">${m.outcome_hit ? "✓ 胜负命中" : "✗ 胜负未中"}</span>
             <span class="hit ${m.score_hit ? "gold" : "no"}">${m.score_hit ? "★ 比分命中" : "比分 " + m.pred.pred_score.join("-")}</span>
+            ${m.pred.fable ? `<span class="fable-tag" title="${esc(m.pred.fable.note)}">Fable ${m.pred.fable.delta > 0 ? "+" : ""}${m.pred.fable.delta}</span>` : ""}
           </div></div>`;
       }
     } else {
@@ -969,7 +974,7 @@
         predHTML = `<div class="m-pred">
           <div class="pred-line"><span>主胜 ${pct(m.pred.p_home, 0)}</span><span>平 ${pct(m.pred.p_draw, 0)}</span><span>客胜 ${pct(m.pred.p_away, 0)}</span></div>
           <div class="obar"><i class="h" style="width:${m.pred.p_home * 100}%"></i><i class="d" style="width:${m.pred.p_draw * 100}%"></i><i class="a" style="width:${m.pred.p_away * 100}%"></i></div>
-          <div class="pred-line"><span>看好 ${pickLabel(m, m.pred)} ${m.pred.pred_score.join("-")}${m.pred.p_draw >= 0.28 ? '<span class="draw-warn">防平</span>' : ""}</span><span>#${m.match}</span></div>${adv}</div>`;
+          <div class="pred-line"><span>看好 ${pickLabel(m, m.pred)} ${m.pred.pred_score.join("-")}${m.pred.p_draw >= 0.28 ? '<span class="draw-warn">防平</span>' : ""}${m.pred.fable ? `<span class="fable-tag" title="${esc(m.pred.fable.note)}">Fable ${m.pred.fable.delta > 0 ? "+" : ""}${m.pred.fable.delta}</span>` : ""}</span><span>#${m.match}</span></div>${adv}</div>`;
       } else {
         predHTML = `<div class="m-pred">对阵确定后给出预测 · #${m.match}</div>`;
       }
@@ -1013,6 +1018,10 @@
     }
     if (p.market) {
       right += `<div class="md-compare">博彩市场（${p.market.books} 家庄家）：主胜 <b>${pct(p.market.p_home, 0)}</b> · 平 <b>${pct(p.market.p_draw, 0)}</b> · 客胜 <b>${pct(p.market.p_away, 0)}</b></div>`;
+    }
+    if (p.fable) {
+      const d = p.fable.delta;
+      right += `<div class="md-compare fable-line"><b>Fable 微调 ${d > 0 ? "+" : ""}${d} 个百分点</b>（${d > 0 ? "偏向" + esc(hn) : "偏向" + esc(an)}）：${esc(p.fable.note)}${p.base ? `<br>引擎原判：主胜 ${pct(p.base.p_home, 0)} / 平 ${pct(p.base.p_draw, 0)} / 客胜 ${pct(p.base.p_away, 0)} → 微调后如上` : ""}</div>`;
     }
     if (m.score) {
       const o = m.score[0] > m.score[1] ? esc(hn) + " 胜" : m.score[0] < m.score[1] ? esc(an) + " 胜" : "战平";
@@ -1160,10 +1169,12 @@
       [s.n, "已预测场次"],
       [pct(s.outcome_acc, 0), "胜平负命中率"],
       [pct(s.score_acc, 0), "精确比分命中率"],
-      [s.brier.toFixed(3), "误差指数 · 越低越好"]
+      [s.brier.toFixed(3), "误差指数 · 越低越好"],
+      ...(s.n_adjusted ? [[s.brier_base.toFixed(3),
+        `纯引擎误差 · Fable 微调 ${s.n_adjusted} 场${s.brier < s.brier_base ? "（微调在赚）" : s.brier > s.brier_base ? "（微调在亏）" : ""}`]] : [])
     ].map(([v, l]) => `<div class="stile"><div class="sv">${v}</div><div class="sl">${l}</div></div>`).join("");
     listEl.innerHTML = D.record.list.map(r => {
-      const m = { ...r, pred: { p_home: r.p_home, p_draw: r.p_draw, p_away: r.p_away, pred_score: r.pred_score, pick: r.pick },
+      const m = { ...r, pred: { p_home: r.p_home, p_draw: r.p_draw, p_away: r.p_away, pred_score: r.pred_score, pick: r.pick, fable: r.fable },
                   slot_home: null, slot_away: null, venue: "", group: null, round: "" };
       return matchCard(m);
     }).join("");
