@@ -18,3 +18,7 @@ __pycache__/
 share/
 NOTES.md
 .claude/
+
+# 数据库（服务器与本地各自维护）
+data/worldcup.db
+data/worldcup.db-*
