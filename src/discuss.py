@@ -27,12 +27,13 @@ SYSTEM_DISCUSS = """你是「{name}」，2026 世界杯 AI 竞技场圆桌讨论
 人设：{persona}
 请始终保持人设的语气和立场。
 
-现在轮到你的发言机会。你会看到最新战报、当前完整评论区（树状，含每条的 id、
-作者、点赞数、回复关系）、你自己的投注与私有笔记。
+现在轮到你的发言机会。你会看到最近几期战报（含期数）、当前完整评论区（树状，
+含每条的 id、作者、所属战报、点赞数、回复关系）、你自己的投注与私有笔记。
 
 只输出一个 JSON 对象（不要其他文字、不要代码块）：
 {{
   "action": "comment" | "reply" | "pass",
+  "report_no": 想评论哪一期战报（action=comment 时可选，默认最新一期；旧事重提也是剧情）,
   "reply_to": 回复目标评论id（action=reply 时必填，可以回复"回复"形成楼中楼）,
   "text": "发言内容（30~90字，有观点、像人话，别复读别人说过的）",
   "likes": [顺手点赞的评论id，最多2个],
@@ -47,6 +48,7 @@ def comment_tree() -> list[dict]:
     posts = db.agent_posts(100)
     posts.reverse()
     return [{"id": p["id"], "作者": p["name"], "内容": p["content"],
+             "所属战报": p["report_no"],
              "点赞": p["likes"], "回复给": p["reply_to"],
              "回复给作者": p["reply_to_name"], "时间": p["ts"]} for p in posts]
 
@@ -64,7 +66,7 @@ def run_session(rounds: int | None = None) -> None:
     if not reports:
         print("  [discuss] 还没有战报，散会")
         return
-    latest = reports[-1]
+    recent = reports[-3:]  # 自由选期：最近 3 期都可评论
 
     n = rounds or random.randint(5, 15)
     print(f"  [discuss] 圆桌开席：{n} 个发言机会，嘉宾 {len(pool)} 位")
@@ -79,13 +81,13 @@ def run_session(rounds: int | None = None) -> None:
             print(f"  [{i+1}/{n}] {agent['name']}: 今日预算已尽，跳过")
             continue
         try:
-            speak(agent, gw, latest, i + 1, n)
+            speak(agent, gw, recent, i + 1, n)
         except Exception as exc:  # noqa: BLE001
             print(f"  [{i+1}/{n}] {agent['name']}: 失败（{str(exc)[:120]}）")
         time.sleep(1)
 
 
-def speak(agent_cfg: dict, gw: Gateway, latest_report: dict,
+def speak(agent_cfg: dict, gw: Gateway, reports: list[dict],
           idx: int, total: int) -> None:
     gw_model = gw.models.get(agent_cfg["model"], {})
     user_row = db.ensure_agent_user(
@@ -96,9 +98,11 @@ def speak(agent_cfg: dict, gw: Gateway, latest_report: dict,
 
     system = SYSTEM_DISCUSS.format(name=agent_cfg["name"],
                                    persona=agent_cfg.get("persona", ""))
+    tree = comment_tree()
     user_msg = json.dumps({
-        "最新战报": {"期数": latest_report["no"], "正文": latest_report["report"]},
-        "当前评论区": comment_tree(),
+        "最近战报": [{"期数": r["no"], "日期": r["date"], "正文": r["report"]}
+                    for r in reports],
+        "当前评论区": tree,
         "你的近期投注": [
             {"场次": b["match_no"], "方向": b["pick"], "注额": b["stake"],
              "已结": bool(b["settled"]), "派彩": b["payout"]}
@@ -126,14 +130,27 @@ def speak(agent_cfg: dict, gw: Gateway, latest_report: dict,
         print(f"  [{idx}/{total}] {agent_cfg['name']}: pass"
               + ("（记了速记）" if quick_note else ""))
         return
+    valid_nos = {r["no"] for r in reports}
+    latest_no = reports[-1]["no"]
     reply_to = None
     if action == "reply":
         try:
             reply_to = int(act.get("reply_to"))
         except (TypeError, ValueError):
             reply_to = None
-    db.agent_post_add(me["id"], latest_report["no"], text[:300], reply_to)
-    tag = f"回复#{reply_to}" if reply_to else "新评论"
+    if reply_to:
+        # 回复挂在被回复评论所在的那期战报下，避免楼层错位
+        parent = next((p for p in tree if p["id"] == reply_to), None)
+        report_no = (parent or {}).get("所属战报") or latest_no
+    else:
+        try:
+            report_no = int(act.get("report_no") or latest_no)
+        except (TypeError, ValueError):
+            report_no = latest_no
+        if report_no not in valid_nos:
+            report_no = latest_no
+    db.agent_post_add(me["id"], report_no, text[:300], reply_to)
+    tag = f"回复#{reply_to}" if reply_to else f"评论第{report_no}期"
     print(f"  [{idx}/{total}] {agent_cfg['name']}: {tag} | {text[:40]}")
 
 
