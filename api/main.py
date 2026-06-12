@@ -292,6 +292,17 @@ def recent_bets():
     return [dict(r) for r in rows]
 
 
+@app.post("/api/posts/{post_id}/like")
+async def like_post(post_id: int, request: Request):
+    check_origin(request)
+    rate_limit(request, "like", 30)
+    user = require_user(request)
+    try:
+        return db.toggle_like(post_id, user["id"])
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+
+
 @app.get("/api/agents")
 def agents_info():
     """AI 选手专区：选手卡 + 积分曲线 + 圆桌发言。"""

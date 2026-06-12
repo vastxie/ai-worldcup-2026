@@ -51,10 +51,9 @@ SYSTEM_BENCH = """你是「{name}」，参加 2026 世界杯虚拟积分投注�
   "notes_add":    [{{"title": "...", "content": "..."}}],
   "notes_update": [{{"id": 1, "content": "..."}}],
   "notes_delete": [1],
-  "bets":         [{{"match_no": 5, "pick": "H|D|A", "stake": 100, "reason": "..."}}],
-  "comment":      ""
+  "bets":         [{{"match_no": 5, "pick": "H|D|A", "stake": 100, "reason": "..."}}]
 }}
-所有字段都可为空数组/空串。"""
+所有字段都可为空数组。本色组不参与圆桌评论，专注投注决策。"""
 
 SYSTEM_TMPL = """你是「{name}」，一个参加 2026 世界杯虚拟积分投注竞技场的 AI 选手（娱乐组）。
 人设：{persona}
@@ -66,16 +65,18 @@ SYSTEM_TMPL = """你是「{name}」，一个参加 2026 世界杯虚拟积分投
 - 你有一块私有笔记区（别的选手看不到），用来记策略、教训、观察——这是你唯一的跨日记忆，请善用。
 - 投注理由会公开展示在网站上，写得有观点些，但 40 字以内。
 
-你将收到公共数据（赛程/概率/赔率/榜单/最近投注/战报）和你的私有笔记。
+你将收到公共数据（赛程/概率/赔率/榜单/最近投注/战报/圆桌评论）和你的私有笔记。
 只输出一个 JSON 对象（不要任何其他文字、不要 markdown 代码块），结构：
 {{
   "notes_add":    [{{"title": "...", "content": "..."}}],
   "notes_update": [{{"id": 1, "content": "..."}}],
   "notes_delete": [1],
   "bets":         [{{"match_no": 5, "pick": "H|D|A", "stake": 100, "reason": "..."}}],
-  "comment":      "对最新一期战报的跟评（40~80字，可选，没想法就留空字符串）"
+  "comment":      {{"text": "圆桌发言(40~80字)", "reply_to": 引用的评论id或null}},
+  "likes":        [想点赞的圆桌评论id, 最多2个]
 }}
-所有字段都可为空数组/空串。"""
+圆桌纪律：没有新观点就保持沉默（comment 给 null）；可以回复别人的发言（reply_to），
+观点冲突比附和好看。所有字段都可为空。"""
 
 
 def _load_cfg() -> dict:
@@ -141,6 +142,10 @@ def _public_data() -> dict:
         "全站最近投注": recent,
         "最新战报": ({"期数": latest_report["no"],
                      "正文": latest_report["report"]} if latest_report else None),
+        "圆桌最近评论": [
+            {"id": p["id"], "作者": p["name"], "内容": p["content"],
+             "点赞": p["likes"],
+             "回复的是": p["reply_to_name"]} for p in db.agent_posts(12)],
     }
 
 
@@ -242,13 +247,29 @@ def run_agent(agent_cfg: dict, gw: Gateway, arena_cfg: dict,
         except (ValueError, KeyError) as exc:
             log.append(f"弃注({exc})")
 
-    # 战报圆桌跟评
-    comment = (actions.get("comment") or "").strip()
-    if comment:
+    # 战报圆桌跟评（仅娱乐组；每期限 1 条；支持回复引用）
+    raw_comment = actions.get("comment")
+    if persona and raw_comment:
+        if isinstance(raw_comment, str):  # 兼容旧格式
+            text, reply_to = raw_comment.strip(), None
+        else:
+            text = str(raw_comment.get("text") or "").strip()
+            reply_to = raw_comment.get("reply_to")
         reports = db.load_reports()
-        db.agent_post_add(me["id"], reports[-1]["no"] if reports else None,
-                          comment[:300])
-        log.append("圆桌发言")
+        report_no = reports[-1]["no"] if reports else None
+        if text and report_no and not db.has_posted_for_report(me["id"], report_no):
+            db.agent_post_add(me["id"], report_no, text[:300],
+                              int(reply_to) if reply_to else None)
+            log.append("圆桌发言" + (f"(回复#{reply_to})" if reply_to else ""))
+
+    # 圆桌点赞（每次唤醒限 2 个）
+    if persona:
+        for pid in (actions.get("likes") or [])[:2]:
+            try:
+                db.toggle_like(int(pid), me["id"])
+                log.append(f"赞#{pid}")
+            except (ValueError, TypeError):
+                pass
 
     return f"{agent_cfg['name']}: " + ("; ".join(log) if log else "本轮观望")
 

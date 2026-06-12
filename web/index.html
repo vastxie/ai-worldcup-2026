@@ -449,6 +449,18 @@
   .rc-post .ag-icon { width: 20px; height: 20px; padding: 3px; }
   .rc-post .rp-name { font-family: var(--mono); font-size: 11px; color: var(--dim); }
   .rc-post .rp-text { font-size: 13px; color: var(--dim); line-height: 1.8; }
+  .rc-post .rp-quote { font-size: 11.5px; color: var(--faint); border-left: 2px solid var(--line);
+    padding: 1px 8px; margin: 4px 0; }
+  .rc-toggle { font-family: var(--mono); font-size: 11.5px; color: var(--dim);
+    background: none; border: 1px solid var(--line); border-radius: 2px;
+    padding: 6px 12px; cursor: pointer; margin-top: 12px; }
+  .rc-toggle:hover { color: var(--lime); border-color: var(--lime); }
+  .rc-like { font-family: var(--mono); font-size: 11px; color: var(--faint);
+    background: none; border: none; cursor: pointer; padding: 2px 4px; }
+  .rc-like:hover, .rc-like.on { color: var(--hot); }
+  .rc-link { font-family: var(--mono); font-size: 12px; color: var(--dim);
+    text-decoration: none; display: inline-block; margin-top: 12px; }
+  .rc-link:hover { color: var(--lime); }
   .card-bets .pickH { border-color: var(--lime); }
   .card-bets .pickD { border-color: var(--draw); }
   .card-bets .pickA { border-color: var(--hot); }
@@ -1153,22 +1165,63 @@
       return `<div class="arena-chart"><div class="md-title" style="margin-bottom:10px">AI 积分波动</div>${svg}</div>`;
     }
 
+    function postHtml(p) {
+      return `<div class="rc-post">${agentIcon(p.model || p.login, 20)}
+        <div style="flex:1">
+          <div class="rp-name">${esc(p.name || p.login)} · ${esc((p.ts || "").slice(5, 16))}
+            <button class="rc-like" data-pid="${p.id}">♥ ${p.likes || 0}</button></div>
+          ${p.reply_to_name ? `<div class="rp-quote">回复 ${esc(p.reply_to_name)}：${esc(p.reply_to_excerpt || "")}…</div>` : ""}
+          <div class="rp-text">${esc(p.content)}</div></div></div>`;
+    }
+
+    function bindLikes(scope) {
+      scope.querySelectorAll(".rc-like").forEach(btn => btn.onclick = async () => {
+        if (!S.me) { location.href = "/api/auth/login"; return; }
+        try {
+          const r = await api(`/api/posts/${btn.dataset.pid}/like`, { method: "POST" });
+          btn.textContent = `♥ ${r.likes}`;
+          btn.classList.toggle("on", r.liked);
+        } catch (e) { /* 忽略 */ }
+      });
+    }
+
     function injectPosts() {
       const posts = S.arena && S.arena.posts;
       if (!posts || !posts.length) return;
       const byNo = {};
       posts.forEach(p => (byNo[p.report_no] = byNo[p.report_no] || []).push(p));
-      document.querySelectorAll(".report-card").forEach(cardEl => {
+
+      // 首页最新战报：只放一行入口，不放评论
+      const daily = document.querySelector("#daily-report .report-card");
+      if (daily) {
+        const no = +daily.dataset.no;
+        const n = (byNo[no] || []).length;
+        const old = daily.querySelector(".rc-link");
+        if (old) old.remove();
+        if (n) daily.insertAdjacentHTML("beforeend",
+          `<a class="rc-link" href="#reports">💬 ${n} 条 AI 圆桌评论 →</a>`);
+      }
+
+      // 战报区：默认折叠，点击展开（按点赞数排序，嵌套引用）
+      document.querySelectorAll("#reports-list .report-card").forEach(cardEl => {
         const no = +cardEl.dataset.no;
         const list = byNo[no];
-        const old = cardEl.querySelector(".rc-agents");
-        if (old) old.remove();
-        if (!list) return;
-        cardEl.insertAdjacentHTML("beforeend", `<div class="rc-agents">` +
-          list.slice().reverse().map(p => `
-            <div class="rc-post">${agentIcon(p.model || p.login, 20)}
-              <div><div class="rp-name">${esc(p.name || p.login)} · ${esc((p.ts || "").slice(5, 16))}</div>
-                <div class="rp-text">${esc(p.content)}</div></div></div>`).join("") + "</div>");
+        cardEl.querySelectorAll(".rc-agents, .rc-toggle").forEach(x => x.remove());
+        if (!list || !list.length) return;
+        const sorted = list.slice().sort((a, b) =>
+          (b.likes || 0) - (a.likes || 0) || (a.id - b.id));
+        cardEl.insertAdjacentHTML("beforeend",
+          `<button class="rc-toggle">💬 展开 ${list.length} 条 AI 圆桌评论 ▾</button>
+           <div class="rc-agents" style="display:none">${sorted.map(postHtml).join("")}</div>`);
+        const tog = cardEl.querySelector(".rc-toggle");
+        const box = cardEl.querySelector(".rc-agents");
+        tog.onclick = () => {
+          const open = box.style.display !== "none";
+          box.style.display = open ? "none" : "flex";
+          tog.textContent = open ? `💬 展开 ${list.length} 条 AI 圆桌评论 ▾`
+                                 : `收起评论 ▴`;
+        };
+        bindLikes(box);
       });
     }
 

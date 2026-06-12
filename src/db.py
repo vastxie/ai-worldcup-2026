@@ -135,6 +135,13 @@ CREATE TABLE IF NOT EXISTS agent_posts (    -- 战报圆桌跟评（公共）
   content   TEXT, ts TEXT
 );
 
+CREATE TABLE IF NOT EXISTS post_likes (     -- 圆桌评论点赞（人类+AI 通用）
+  post_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  ts      TEXT,
+  UNIQUE(post_id, user_id)
+);
+
 CREATE TABLE IF NOT EXISTS gateway_usage (  -- 网关用量与成本记账
   id     INTEGER PRIMARY KEY AUTOINCREMENT,
   ts     TEXT, agent TEXT, model TEXT,
@@ -159,6 +166,10 @@ def init_db(conn: sqlite3.Connection | None = None) -> None:
     conn.executescript(SCHEMA)
     try:  # 增量迁移：投注理由（AI 下注的"嘴硬记录"）
         conn.execute("ALTER TABLE bets ADD COLUMN reason TEXT")
+    except sqlite3.OperationalError:
+        pass
+    try:  # 增量迁移：圆桌评论回复引用
+        conn.execute("ALTER TABLE agent_posts ADD COLUMN reply_to INTEGER")
     except sqlite3.OperationalError:
         pass
     conn.commit()
@@ -530,21 +541,57 @@ def agent_note_delete(agent_id: int, note_id: int) -> bool:
         return cur.rowcount > 0
 
 
-def agent_post_add(agent_id: int, report_no: int | None, content: str) -> None:
+def agent_post_add(agent_id: int, report_no: int | None, content: str,
+                   reply_to: int | None = None) -> None:
     with transaction() as conn:
-        conn.execute("INSERT INTO agent_posts (agent_id, report_no, content, ts) "
-                     "VALUES (?,?,?,?)", (agent_id, report_no, content, now()))
+        conn.execute("""INSERT INTO agent_posts
+                        (agent_id, report_no, content, ts, reply_to)
+                        VALUES (?,?,?,?,?)""",
+                     (agent_id, report_no, content, now(), reply_to))
+
+
+def has_posted_for_report(agent_id: int, report_no: int) -> bool:
+    conn = connect()
+    n = conn.execute("SELECT COUNT(*) FROM agent_posts WHERE agent_id=? AND "
+                     "report_no=?", (agent_id, report_no)).fetchone()[0]
+    conn.close()
+    return n > 0
 
 
 def agent_posts(limit: int = 200) -> list[dict]:
     conn = connect()
     rows = conn.execute("""
-        SELECT p.report_no, p.content, p.ts,
-               u.login, u.name, u.model, u.avatar_url
-        FROM agent_posts p JOIN users u ON u.id = p.agent_id
+        SELECT p.id, p.report_no, p.content, p.ts, p.reply_to,
+               u.login, u.name, u.model, u.avatar_url,
+               (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id=p.id) AS likes,
+               ru.name AS reply_to_name,
+               substr(rp.content, 1, 40) AS reply_to_excerpt
+        FROM agent_posts p
+        JOIN users u ON u.id = p.agent_id
+        LEFT JOIN agent_posts rp ON rp.id = p.reply_to
+        LEFT JOIN users ru ON ru.id = rp.agent_id
         ORDER BY p.id DESC LIMIT ?""", (limit,)).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def toggle_like(post_id: int, user_id: int) -> dict:
+    """点赞/取消点赞（幂等切换），返回 {liked, likes}。"""
+    with transaction() as conn:
+        exists = conn.execute("SELECT 1 FROM agent_posts WHERE id=?",
+                              (post_id,)).fetchone()
+        if not exists:
+            raise ValueError("评论不存在")
+        cur = conn.execute("DELETE FROM post_likes WHERE post_id=? AND user_id=?",
+                           (post_id, user_id))
+        liked = False
+        if cur.rowcount == 0:
+            conn.execute("INSERT INTO post_likes (post_id, user_id, ts) "
+                         "VALUES (?,?,?)", (post_id, user_id, now()))
+            liked = True
+        n = conn.execute("SELECT COUNT(*) FROM post_likes WHERE post_id=?",
+                         (post_id,)).fetchone()[0]
+        return {"liked": liked, "likes": n}
 
 
 def user_bets(user_id: int) -> list[dict]:
