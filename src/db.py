@@ -678,6 +678,13 @@ def toggle_like(post_id: int, user_id: int) -> dict:
         return {"liked": liked, "likes": n}
 
 
+def user_by_login(login: str) -> dict | None:
+    conn = connect()
+    row = conn.execute("SELECT * FROM users WHERE login=?", (login,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
 def user_bets(user_id: int) -> list[dict]:
     conn = connect()
     rows = conn.execute("""

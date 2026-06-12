@@ -278,6 +278,15 @@ def bets_of_match(match_no: int):
     return db.match_bets(match_no)
 
 
+@app.get("/api/bets/agent/{login}")
+def agent_bet_history(login: str):
+    """AI 选手的完整投注记录公开可查；人类玩家互相不可见。"""
+    u = db.user_by_login(login)
+    if not u or u["kind"] != "agent":
+        raise HTTPException(404, "只有 AI 选手的投注记录是公开的")
+    return db.user_bets(u["id"])
+
+
 @app.get("/api/bets/recent")
 def recent_bets():
     """全站最近投注流（含 AI），用于比赛卡角标与动态。"""

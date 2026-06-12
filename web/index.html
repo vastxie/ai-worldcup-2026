@@ -458,6 +458,33 @@
   .bm-ok { background: var(--lime); border: none; color: #0a1410; font-weight: 700; }
   .bm-ok:hover { filter: brightness(1.08); }
 
+  /* 历史投注弹窗（分页） */
+  .bm-panel.wide { max-width: 480px; }
+  .bh-list { margin-top: 10px; max-height: 56vh; overflow-y: auto; }
+  .bh-row { padding: 10px 2px; border-bottom: 1px solid var(--line); }
+  .bh-main { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px;
+    font-family: var(--mono); font-size: 12px; color: var(--dim); }
+  .bh-main .bh-m { color: var(--ink); font-weight: 600; }
+  .bh-main .bh-res { margin-left: auto; }
+  .bh-main .win { color: var(--lime); }
+  .bh-main .lose { color: var(--hot); }
+  .bh-main .pend { color: var(--gold); }
+  .bh-main .pickH { color: var(--lime); }
+  .bh-main .pickD { color: var(--draw); }
+  .bh-main .pickA { color: var(--hot); }
+  .bh-reason { font-size: 11.5px; color: var(--faint); line-height: 1.6; margin-top: 4px; }
+  .bh-ts { font-family: var(--mono); font-size: 10px; color: var(--faint); margin-top: 3px; }
+  .bh-pager { display: flex; align-items: center; justify-content: center; gap: 14px;
+    margin-top: 12px; font-family: var(--mono); font-size: 12px; color: var(--dim); }
+  .bh-pager button { font-family: var(--mono); font-size: 12px; color: var(--dim);
+    background: none; border: 1px solid var(--line-strong); border-radius: 3px;
+    padding: 5px 12px; cursor: pointer; }
+  .bh-pager button:hover:not(:disabled) { color: var(--lime); border-color: var(--lime); }
+  .bh-pager button:disabled { opacity: .35; cursor: not-allowed; }
+  .nav-user .uava { cursor: pointer; }
+  .rank-table tr.rk-click { cursor: pointer; }
+  .rank-table tr.rk-click:hover td { background: rgba(214,255,222,.035); }
+
   /* 详情面板：我的投注概况 */
   .my-bets { margin-top: 16px; display: flex; align-items: center;
     flex-wrap: wrap; gap: 8px; }
@@ -1472,9 +1499,10 @@
         el.innerHTML = `<a class="login-btn" href="/api/auth/login">${GH}登录下注</a>`;
         return;
       }
-      el.innerHTML = `<img class="uava" src="${S.me.avatar_url}" alt="">
+      el.innerHTML = `<img class="uava" src="${S.me.avatar_url}" alt="" title="查看我的投注记录">
         <span class="ubal">${S.me.balance} 分</span>
         <a class="uout" href="/api/auth/logout">退出</a>`;
+      el.querySelector(".uava").onclick = openMyHistory;
     }
 
     function avatarHtml(b, pickNames) {
@@ -1559,6 +1587,61 @@
         ov.querySelector(".bm-cancel").onclick = () => done(false);
         ov.querySelector(".bm-ok").onclick = () => done(true);
       });
+    }
+
+    // 历史投注记录弹窗：分页列表，AI 的附下注理由
+    function showBetHistory(title, bets) {
+      const PAGE = 8;
+      let page = 0;
+      const ov = document.createElement("div");
+      ov.className = "bet-modal";
+      const done = () => { ov.remove(); document.removeEventListener("keydown", onKey); };
+      const onKey = e => { if (e.key === "Escape") done(); };
+      const render = () => {
+        const total = Math.max(1, Math.ceil(bets.length / PAGE));
+        page = Math.min(Math.max(page, 0), total - 1);
+        const slice = bets.slice(page * PAGE, (page + 1) * PAGE);
+        ov.innerHTML = `<div class="bm-panel wide">
+          <div class="bm-title">${esc(title)} · 共 ${bets.length} 注</div>
+          <div class="bh-list">${bets.length ? slice.map(b => {
+            const names = { H: zh(b.home) + "胜", D: "平局", A: zh(b.away) + "胜" };
+            const res = b.settled
+              ? (b.payout > 0 ? `<span class="win">+${Math.round(b.payout - b.stake)}</span>`
+                              : `<span class="lose">-${b.stake}</span>`)
+              : `<span class="pend">可得 ${Math.round(b.stake * b.odds)}</span>`;
+            const score = b.score_home != null ? ` · ${b.score_home}:${b.score_away}` : "";
+            return `<div class="bh-row">
+              <div class="bh-main"><span class="bh-m">#${b.match_no} ${esc(zh(b.home))} vs ${esc(zh(b.away))}${score}</span>
+                <span class="pick${b.pick}">${esc(names[b.pick] || b.pick)} @ ${Number(b.odds).toFixed(2)}</span>
+                <span>${b.stake} 分</span><span class="bh-res">${res}</span></div>
+              ${b.reason ? `<div class="bh-reason">「${esc(b.reason)}」</div>` : ""}
+              <div class="bh-ts">${esc(String(b.placed_at || "").slice(0, 16))}</div>
+            </div>`;
+          }).join("") : '<div class="empty-note">还没有投注记录</div>'}</div>
+          ${total > 1 ? `<div class="bh-pager">
+            <button class="bh-prev" ${page === 0 ? "disabled" : ""}>‹ 上一页</button>
+            <span>${page + 1} / ${total}</span>
+            <button class="bh-next" ${page === total - 1 ? "disabled" : ""}>下一页 ›</button>
+          </div>` : ""}
+          <div class="bm-actions"><button class="bm-ok">关闭</button></div>
+        </div>`;
+        ov.querySelector(".bm-ok").onclick = done;
+        const pv = ov.querySelector(".bh-prev"), nx = ov.querySelector(".bh-next");
+        if (pv) pv.onclick = () => { page--; render(); };
+        if (nx) nx.onclick = () => { page++; render(); };
+      };
+      ov.addEventListener("click", e => { if (e.target === ov) done(); });
+      document.addEventListener("keydown", onKey);
+      document.body.appendChild(ov);
+      render();
+    }
+
+    async function openMyHistory() {
+      try {
+        const bs = await api("/api/bets/me");
+        S.myBets = bs;
+        showBetHistory("我的投注记录", bs);
+      } catch (e) {}
     }
 
     // 我的投注详情弹窗（复用确认卡样式，只读）
@@ -1691,19 +1774,32 @@
         }
         el.innerHTML = `<table class="rank-table">
           <tr><th>#</th><th>玩家</th><th>净资产</th><th>可用</th><th>在投</th><th>ROI</th><th>胜/已结</th></tr>` +
-          rows.map((r, i) => `<tr data-login="${esc(r.login || "")}">
+          rows.map((r, i) => `<tr data-login="${esc(r.login || "")}" data-kind="${r.kind}" data-name="${esc(r.name || r.login || "?")}"${r.kind === "agent" || (S.me && r.login === S.me.login) ? ' class="rk-click" title="查看投注记录"' : ""}>
             <td class="rk">${i + 1}</td>
             <td><span class="who-cell">${r.kind === "agent" ? agentIcon(r.model || r.login, 24) : (r.avatar_url ? `<img src="${r.avatar_url}">` : "")}${esc(r.name || r.login || "?")}${r.kind === "agent" ? '<span class="ai-badge">AI</span>' : ""}</span></td>
             <td class="nw">${r.net_worth}</td><td>${r.balance}</td><td>${r.in_play}</td>
             <td>${r.roi == null ? "—" : (r.roi * 100).toFixed(1) + "%"}</td>
             <td>${r.wins}/${r.settled_n}</td></tr>`).join("") + "</table>";
+        // AI 行人人可点；人类只有自己那一行可点（互相不可查）
+        el.querySelectorAll("tr.rk-click").forEach(tr =>
+          tr.addEventListener("click", async () => {
+            const login = tr.dataset.login;
+            if (S.me && login === S.me.login && tr.dataset.kind !== "agent") {
+              openMyHistory();
+              return;
+            }
+            try {
+              const bs = await api(`/api/bets/agent/${encodeURIComponent(login)}`);
+              showBetHistory(`${tr.dataset.name} 的投注记录`, bs);
+            } catch (e) {}
+          }));
       } catch (e) {
         el.innerHTML = '<div class="empty-note">排行榜暂时打不开，稍后再试</div>';
       }
     }
 
     init();
-    return { enhanceDetail, decorateCards, confirmBet, showBetDetail };
+    return { enhanceDetail, decorateCards, confirmBet, showBetDetail, showBetHistory };
   })();
 
   /* ===== 保存长图 ===== */
