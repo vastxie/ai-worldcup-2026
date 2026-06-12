@@ -55,12 +55,13 @@ def _post(url: str, headers: dict, body: dict) -> dict:
 
 def _call_openai(cfg: dict, system: str, user: str, max_tokens: int,
                  temperature: float) -> dict:
+    body = {"model": cfg["model"],
+            "messages": [{"role": "system", "content": system},
+                         {"role": "user", "content": user}],
+            "max_tokens": max_tokens, "temperature": temperature}
+    body.update(cfg.get("extra") or {})  # 如 reasoning_effort 等模型特有参数
     out = _post(cfg["base_url"].rstrip("/") + "/chat/completions",
-                {"Authorization": f"Bearer {cfg['api_key']}"},
-                {"model": cfg["model"],
-                 "messages": [{"role": "system", "content": system},
-                              {"role": "user", "content": user}],
-                 "max_tokens": max_tokens, "temperature": temperature})
+                {"Authorization": f"Bearer {cfg['api_key']}"}, body)
     usage = out.get("usage") or {}
     return {"text": out["choices"][0]["message"]["content"] or "",
             "prompt_tokens": usage.get("prompt_tokens", 0),
@@ -102,6 +103,30 @@ def _call_gemini(cfg: dict, system: str, user: str, max_tokens: int,
             "completion_tokens": usage.get("candidatesTokenCount", 0)}
 
 
+def _call_openai_responses(cfg: dict, system: str, user: str, max_tokens: int,
+                           temperature: float) -> dict:
+    """OpenAI Responses 协议（豆包 Ark v3 等，参考 99Agent doubao_responses）。"""
+    url = cfg["base_url"].rstrip("/")
+    if not url.endswith("/responses"):
+        url += "/responses"
+    body = {"model": cfg["model"],
+            "input": [{"role": "system", "content": system},
+                      {"role": "user", "content": user}],
+            "max_output_tokens": max_tokens}
+    body.update(cfg.get("extra") or {})
+    out = _post(url, {"Authorization": f"Bearer {cfg['api_key']}"}, body)
+    text = ""
+    for item in out.get("output", []):
+        if item.get("type") == "message":
+            for c in item.get("content", []):
+                if c.get("type") in ("output_text", "text"):
+                    text += c.get("text", "")
+    usage = out.get("usage") or {}
+    return {"text": text,
+            "prompt_tokens": usage.get("input_tokens", 0),
+            "completion_tokens": usage.get("output_tokens", 0)}
+
+
 def _call_mock(cfg: dict, system: str, user: str, max_tokens: int,
                temperature: float) -> dict:
     return {"text": cfg.get("mock_response", "{}"),
@@ -109,7 +134,8 @@ def _call_mock(cfg: dict, system: str, user: str, max_tokens: int,
 
 
 ADAPTERS = {"openai": _call_openai, "anthropic": _call_anthropic,
-            "gemini": _call_gemini, "mock": _call_mock}
+            "gemini": _call_gemini, "openai_responses": _call_openai_responses,
+            "mock": _call_mock}
 
 
 # ----------------------------------------------------------------- 网关类 --
