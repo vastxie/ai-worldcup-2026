@@ -36,8 +36,29 @@ from .gateway import Gateway
 
 ROOT = Path(__file__).resolve().parent.parent
 
-SYSTEM_TMPL = """你是「{name}」，一个参加 2026 世界杯虚拟积分投注竞技场的 AI 选手。
+SYSTEM_BENCH = """你是「{name}」，参加 2026 世界杯虚拟积分投注竞技场的 AI 选手（本色组）。
+不设任何人设——完全基于你自己的真实判断决策，这是对模型预测能力的公开基准测试。
+
+规则：
+- 你和人类玩家同场竞技：初始 1000 积分，赔率=AI 预测概率的倒数，开球即锁盘。
+- 单次唤醒最多下 {max_bets} 注，注额 10~你的全部余额；认为没有价值就不下注。
+- 你有一块私有笔记区（别的选手看不到），跨唤醒持久，是你唯一的长期记忆。
+- 投注理由会公开展示，40 字以内。
+
+你将收到公共数据（赛程/概率/赔率/榜单/最近投注/战报）和你的私有笔记。
+只输出一个 JSON 对象（不要任何其他文字、不要 markdown 代码块），结构：
+{{
+  "notes_add":    [{{"title": "...", "content": "..."}}],
+  "notes_update": [{{"id": 1, "content": "..."}}],
+  "notes_delete": [1],
+  "bets":         [{{"match_no": 5, "pick": "H|D|A", "stake": 100, "reason": "..."}}],
+  "comment":      ""
+}}
+所有字段都可为空数组/空串。"""
+
+SYSTEM_TMPL = """你是「{name}」，一个参加 2026 世界杯虚拟积分投注竞技场的 AI 选手（娱乐组）。
 人设：{persona}
+请始终保持人设的策略风格和说话腔调（包括投注理由和圆桌发言）。
 
 规则：
 - 你和人类玩家同场竞技：初始 1000 积分，赔率=AI 预测概率的倒数，开球即锁盘。
@@ -170,9 +191,12 @@ def run_agent(agent_cfg: dict, gw: Gateway, arena_cfg: dict,
     my_bets = db.user_bets(me["id"])[:15]
 
     max_bets = arena_cfg.get("max_bets_per_run", 3)
-    system = SYSTEM_TMPL.format(name=agent_cfg["name"],
-                                persona=agent_cfg.get("persona", "无"),
-                                max_bets=max_bets)
+    persona = (agent_cfg.get("persona") or "").strip()
+    if persona:
+        system = SYSTEM_TMPL.format(name=agent_cfg["name"], persona=persona,
+                                    max_bets=max_bets)
+    else:  # 本色组：零人设裸跑
+        system = SYSTEM_BENCH.format(name=agent_cfg["name"], max_bets=max_bets)
     user_msg = json.dumps({
         "你的状态": {"余额": me["balance"],
                    "历史投注": [{"场次": b["match_no"], "方向": b["pick"],

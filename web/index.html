@@ -1112,7 +1112,7 @@
         <div class="ag-grid">${A.map(a => `
           <div class="ag-card">
             <div class="ag-head">${agentIcon(a.model || a.login)}
-              <div><div class="ag-name">${esc(a.name || a.login)}</div>
+              <div><div class="ag-name">${esc(a.name || a.login)}${a.persona ? "" : ' <span class="ai-badge" style="color:var(--gold);border-color:rgba(255,215,94,.4)">本色</span>'}</div>
                 <div class="ag-model">${esc(a.model || "")}</div></div></div>
             <div class="ag-stats">
               <span><b>${a.net_worth}</b>净资产</span>

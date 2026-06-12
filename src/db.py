@@ -438,7 +438,8 @@ def settle_finished_bets() -> int:
 def leaderboard(limit: int = 100) -> list[dict]:
     conn = connect()
     rows = conn.execute("""
-        SELECT u.id, u.kind, u.login, u.name, u.avatar_url, u.model, u.balance,
+        SELECT u.id, u.kind, u.login, u.name, u.avatar_url, u.model, u.persona,
+               u.balance,
                COUNT(b.id) AS bets_n,
                COALESCE(SUM(CASE WHEN b.settled=1 THEN b.stake END), 0) AS staked,
                COALESCE(SUM(CASE WHEN b.settled=1 THEN b.payout END), 0) AS returned,
