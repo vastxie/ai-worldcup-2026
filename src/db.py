@@ -346,6 +346,150 @@ def snapshot_odds(kind: str, payload: dict) -> None:
                      "VALUES (?,?,?)", (now(), kind, json.dumps(payload)))
 
 
+# ------------------------------------------------------------ users/bets --
+
+INIT_BALANCE = 1000
+
+
+def get_or_create_github_user(github_id: int, login: str, name: str | None,
+                              avatar_url: str | None) -> dict:
+    """登录入口：新用户发初始积分并记账。返回用户行 dict。"""
+    with transaction() as conn:
+        row = conn.execute("SELECT * FROM users WHERE github_id=?",
+                           (github_id,)).fetchone()
+        if row:
+            conn.execute("UPDATE users SET login=?, name=?, avatar_url=? "
+                         "WHERE id=?", (login, name, avatar_url, row["id"]))
+            return dict(row)
+        cur = conn.execute("""INSERT INTO users
+            (kind, github_id, login, name, avatar_url, balance, created_at)
+            VALUES ('human',?,?,?,?,?,?)""",
+            (github_id, login, name, avatar_url, INIT_BALANCE, now()))
+        uid = cur.lastrowid
+        conn.execute("""INSERT INTO wallet_ledger (user_id, delta, reason, ts)
+                        VALUES (?,?,?,?)""", (uid, INIT_BALANCE, "init", now()))
+        return dict(conn.execute("SELECT * FROM users WHERE id=?",
+                                 (uid,)).fetchone())
+
+
+def get_user(user_id: int) -> dict | None:
+    conn = connect()
+    row = conn.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def place_bet(user_id: int, match_no: int, pick: str, stake: int,
+              odds: float) -> dict:
+    """事务下注：校验余额、扣款、记账。调用方负责开球时间与赔率校验。"""
+    with transaction() as conn:
+        user = conn.execute("SELECT * FROM users WHERE id=?",
+                            (user_id,)).fetchone()
+        if not user:
+            raise ValueError("用户不存在")
+        if user["balance"] < stake:
+            raise ValueError("余额不足")
+        cur = conn.execute("""INSERT INTO bets
+            (user_id, match_no, pick, stake, odds, placed_at)
+            VALUES (?,?,?,?,?,?)""",
+            (user_id, match_no, pick, stake, odds, now()))
+        bet_id = cur.lastrowid
+        conn.execute("UPDATE users SET balance = balance - ? WHERE id=?",
+                     (stake, user_id))
+        conn.execute("""INSERT INTO wallet_ledger
+                        (user_id, delta, reason, ref_id, ts)
+                        VALUES (?,?,?,?,?)""",
+                     (user_id, -stake, "bet", bet_id, now()))
+        return dict(conn.execute("SELECT * FROM bets WHERE id=?",
+                                 (bet_id,)).fetchone())
+
+
+def settle_finished_bets() -> int:
+    """幂等结算所有已完赛比赛的未结投注。返回结算笔数。"""
+    settled = 0
+    with transaction() as conn:
+        rows = conn.execute("""
+            SELECT b.*, m.score_home, m.score_away FROM bets b
+            JOIN matches m ON m.match_no = b.match_no
+            WHERE b.settled = 0 AND m.score_home IS NOT NULL
+        """).fetchall()
+        for b in rows:
+            outcome = ("H" if b["score_home"] > b["score_away"]
+                       else "A" if b["score_away"] > b["score_home"] else "D")
+            payout = round(b["stake"] * b["odds"]) if b["pick"] == outcome else 0
+            conn.execute("""UPDATE bets SET settled=1, payout=?, settled_at=?
+                            WHERE id=? AND settled=0""",
+                         (payout, now(), b["id"]))
+            if payout:
+                conn.execute("UPDATE users SET balance = balance + ? "
+                             "WHERE id=?", (payout, b["user_id"]))
+                conn.execute("""INSERT INTO wallet_ledger
+                                (user_id, delta, reason, ref_id, ts)
+                                VALUES (?,?,?,?,?)""",
+                             (b["user_id"], payout, "payout", b["id"], now()))
+            settled += 1
+    return settled
+
+
+def leaderboard(limit: int = 100) -> list[dict]:
+    conn = connect()
+    rows = conn.execute("""
+        SELECT u.id, u.kind, u.login, u.name, u.avatar_url, u.model, u.balance,
+               COUNT(b.id) AS bets_n,
+               COALESCE(SUM(CASE WHEN b.settled=1 THEN b.stake END), 0) AS staked,
+               COALESCE(SUM(CASE WHEN b.settled=1 THEN b.payout END), 0) AS returned,
+               COALESCE(SUM(CASE WHEN b.settled=1 AND b.payout>0 THEN 1 ELSE 0 END), 0) AS wins,
+               COALESCE(SUM(CASE WHEN b.settled=1 THEN 1 ELSE 0 END), 0) AS settled_n,
+               COALESCE(SUM(CASE WHEN b.settled=0 THEN b.stake END), 0) AS in_play
+        FROM users u LEFT JOIN bets b ON b.user_id = u.id
+        GROUP BY u.id ORDER BY (u.balance + COALESCE(SUM(
+            CASE WHEN b.settled=0 THEN b.stake END), 0)) DESC
+        LIMIT ?""", (limit,)).fetchall()
+    conn.close()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["roi"] = (round((d["returned"] - d["staked"]) / d["staked"], 4)
+                    if d["staked"] else None)
+        d["net_worth"] = d["balance"] + d["in_play"]
+        out.append(d)
+    return out
+
+
+def match_bets(match_no: int) -> list[dict]:
+    conn = connect()
+    rows = conn.execute("""
+        SELECT b.id, b.pick, b.stake, b.odds, b.settled, b.payout, b.placed_at,
+               u.id AS user_id, u.kind, u.login, u.name, u.avatar_url, u.model
+        FROM bets b JOIN users u ON u.id = b.user_id
+        WHERE b.match_no=? ORDER BY b.placed_at""", (match_no,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def user_bets(user_id: int) -> list[dict]:
+    conn = connect()
+    rows = conn.execute("""
+        SELECT b.*, m.home, m.away, m.date_utc, m.score_home, m.score_away
+        FROM bets b JOIN matches m ON m.match_no = b.match_no
+        WHERE b.user_id=? ORDER BY b.placed_at DESC""", (user_id,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def balance_timeline(user_id: int) -> list[dict]:
+    """积分余额随时间的累计曲线（折线图数据）。"""
+    conn = connect()
+    rows = conn.execute("SELECT delta, ts FROM wallet_ledger WHERE user_id=? "
+                        "ORDER BY id", (user_id,)).fetchall()
+    conn.close()
+    bal, out = 0, []
+    for r in rows:
+        bal += r["delta"]
+        out.append({"ts": r["ts"], "balance": bal})
+    return out
+
+
 if __name__ == "__main__":
     init_db()
     print(f"数据库已初始化: {DB_PATH}")

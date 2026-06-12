@@ -271,6 +271,11 @@ def run(sims: int, seed: int | None, do_fetch: bool,
     if do_fetch:
         fetch.sync()
         odds.sync()
+
+    settled = db.settle_finished_bets()
+    if settled:
+        print(f"  [bets] 已结算 {settled} 笔投注")
+
     state = build_state()
     played = len(state["records"])
     if seed is None:
