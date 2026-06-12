@@ -1202,12 +1202,13 @@
         const no = +card.dataset.match;
         const old = card.querySelector(".card-bets");
         if (old) old.remove();
-        const bs = S.byMatch[no];
-        if (!bs || !bs.length) return;
+        // 卡片角标只展示 AI 选手的投注；人类投注不上墙
+        const bs = (S.byMatch[no] || []).filter(b => b.kind === "agent");
+        if (!bs.length) return;
         const avatars = bs.slice(0, 6).map(avatarHtml).join("");
         const more = bs.length > 6 ? `<span class="cb-more">+${bs.length - 6}</span>` : "";
         card.querySelector(".m-when").insertAdjacentHTML("beforeend",
-          `<span class="card-bets" title="本场已有 ${bs.length} 注">${avatars}${more}</span>`);
+          `<span class="card-bets" title="AI 选手已下 ${bs.length} 注">${avatars}${more}</span>`);
       });
     }
 
