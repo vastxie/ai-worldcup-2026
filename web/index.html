@@ -241,7 +241,8 @@
   .m-side.away { justify-content: flex-end; }
   .m-side .tbd { color: var(--faint); font-weight: 400; font-size: 13px; }
   .m-mid { text-align: center; font-family: var(--mono); }
-  .m-mid .sc { font-size: 21px; font-weight: 600; letter-spacing: .06em; }
+  .m-mid .sc { font-size: 21px; font-weight: 600; letter-spacing: .12em;
+    white-space: nowrap; }
   .m-mid .vs { font-size: 12px; color: var(--faint); letter-spacing: .2em; }
   .m-mid .pens { display: block; font-size: 10px; color: var(--gold); }
   .m-pred { font-family: var(--mono); font-size: 11px; color: var(--faint); }
@@ -456,6 +457,19 @@
   .bm-cancel:hover { color: var(--ink); }
   .bm-ok { background: var(--lime); border: none; color: #0a1410; font-weight: 700; }
   .bm-ok:hover { filter: brightness(1.08); }
+
+  /* 详情面板：我的投注概况 */
+  .my-bets { margin-top: 16px; display: flex; align-items: center;
+    flex-wrap: wrap; gap: 8px; }
+  .my-bets .mbt { font-family: var(--mono); font-size: 11px; color: var(--faint);
+    letter-spacing: .15em; }
+  .mb-chip { font-family: var(--mono); font-size: 11.5px; color: var(--dim);
+    border: 1px solid var(--line-strong); border-radius: 3px; padding: 5px 10px;
+    cursor: pointer; background: rgba(214,255,222,.03); }
+  .mb-chip:hover { border-color: var(--lime); color: var(--ink); }
+  .mb-chip .win { color: var(--lime); }
+  .mb-chip .lose { color: var(--hot); }
+  .mb-chip .pend { color: var(--gold); }
   .bet-msg { font-family: var(--mono); font-size: 11.5px; margin-top: 8px; color: var(--dim); }
   .bet-msg.ok { color: var(--lime); }
   .bet-msg.err { color: var(--hot); }
@@ -955,7 +969,7 @@
     let mid, predHTML = '<div class="m-pred"></div>';
     if (m.score) {
       const pens = m.score[0] === m.score[1] && m.winner ? `<span class="pens">点球 ${esc(zh(m.winner))} 晋级</span>` : "";
-      mid = `<span class="m-mid"><span class="sc">${m.score[0]} : ${m.score[1]}</span>${pens}</span>`;
+      mid = `<span class="m-mid"><span class="sc">${m.score[0]}:${m.score[1]}</span>${pens}</span>`;
       if (m.pred) {
         predHTML = `<div class="m-pred">
           <div class="pred-line"><span>赛前 主${pct(m.pred.p_home, 0)}</span><span>平${pct(m.pred.p_draw, 0)}</span><span>客${pct(m.pred.p_away, 0)}</span></div>
@@ -1183,7 +1197,7 @@
   /* ===== 竞技场：登录 / 下注 / 排行榜 ===== */
   window.Arena = (function () {
     const GH = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>';
-    const S = { me: null, odds: {}, byMatch: {}, on: false };
+    const S = { me: null, odds: {}, byMatch: {}, myBets: [], on: false };
     const api = (p, opt) => fetch(p, Object.assign({ credentials: "same-origin" }, opt))
       .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e.detail || ("HTTP " + r.status))));
 
@@ -1197,6 +1211,7 @@
         const [me, odds, bets] = await Promise.all(
           [api("/api/me"), api("/api/odds"), api("/api/bets/recent")]);
         S.me = me.login ? me : null;
+        if (S.me) api("/api/bets/me").then(b => { S.myBets = b; }).catch(() => {});
         S.odds = odds;
         groupBets(bets);
         S.on = true;
@@ -1546,8 +1561,65 @@
       });
     }
 
+    // 我的投注详情弹窗（复用确认卡样式，只读）
+    function showBetDetail(b, m) {
+      const names = { H: zh(m.home) + "胜", D: "平局", A: zh(m.away) + "胜" };
+      const win = Math.round(b.stake * b.odds);
+      const status = b.settled
+        ? (b.payout > 0
+          ? `<b class="gain">已结算 · 派彩 ${Math.round(b.payout)}（净赚 +${Math.round(b.payout - b.stake)}）</b>`
+          : `<b class="loss">已结算 · 未中（-${b.stake}）</b>`)
+        : `<b>待开奖</b>`;
+      const ov = document.createElement("div");
+      ov.className = "bet-modal";
+      ov.innerHTML = `<div class="bm-panel">
+        <div class="bm-title">我的投注</div>
+        <div class="bm-match">${esc(zh(m.home))} vs ${esc(zh(m.away))} · 第${m.match}场</div>
+        <div class="bm-rows">
+          <div><span>方向</span><b class="pick${b.pick}">${esc(names[b.pick] || b.pick)} @ ${Number(b.odds).toFixed(2)}</b></div>
+          <div><span>注额</span><b>${b.stake} 分</b></div>
+          <div><span>命中可得</span><b class="gain">${win} 分（净赚 +${win - b.stake}）</b></div>
+          <div><span>状态</span>${status}</div>
+          <div><span>下注时间</span><b>${esc(String(b.placed_at || "").slice(0, 16))}</b></div>
+        </div>
+        <div class="bm-actions"><button class="bm-ok">关闭</button></div>
+      </div>`;
+      document.body.appendChild(ov);
+      const done = () => { ov.remove(); document.removeEventListener("keydown", onKey); };
+      const onKey = e => { if (e.key === "Escape") done(); };
+      document.addEventListener("keydown", onKey);
+      ov.addEventListener("click", e => { if (e.target === ov) done(); });
+      ov.querySelector(".bm-ok").onclick = done;
+    }
+
+    // 详情面板顶部：我在这场的投注概况（已赛未赛都显示）
+    function injectMyBets(det, m) {
+      det.querySelectorAll(".my-bets").forEach(o => o.remove());
+      if (!S.me) return;
+      const mine = S.myBets.filter(b => b.match_no === m.match);
+      if (!mine.length) return;
+      const names = { H: zh(m.home) + "胜", D: "平局", A: zh(m.away) + "胜" };
+      const box = document.createElement("div");
+      box.className = "my-bets";
+      box.innerHTML = `<span class="mbt">我的投注</span>` + mine.map((b, i) => {
+        const res = b.settled
+          ? (b.payout > 0 ? `<span class="win">+${Math.round(b.payout - b.stake)}</span>`
+                          : `<span class="lose">-${b.stake}</span>`)
+          : `<span class="pend">可得 ${Math.round(b.stake * b.odds)}</span>`;
+        return `<button class="mb-chip" data-i="${i}">${esc(names[b.pick] || b.pick)} · ${b.stake} @ ${Number(b.odds).toFixed(2)} · ${res}</button>`;
+      }).join("");
+      det.lastElementChild.appendChild(box);
+      box.querySelectorAll(".mb-chip").forEach(ch =>
+        ch.addEventListener("click", e => {
+          e.stopPropagation();
+          showBetDetail(mine[+ch.dataset.i], m);
+        }));
+    }
+
     function enhanceDetail(det, m) {
-      if (!S.on || m.score) return;
+      if (!S.on) return;
+      injectMyBets(det, m);
+      if (m.score) return;
       const o = S.odds[m.match];
       if (!o) return;
       const names = { H: zh(m.home) + "胜", D: "平局", A: zh(m.away) + "胜" };
@@ -1597,6 +1669,7 @@
           msg.textContent = `已下注 ${stake} @ ${r.bet.odds} · 祝好运`;
           msg.className = "bet-msg ok";
           api("/api/bets/recent").then(bs => { groupBets(bs); decorateCards(); });
+          api("/api/bets/me").then(b => { S.myBets = b; injectMyBets(det, m); }).catch(() => {});
         } catch (e) {
           msg.textContent = String(e);
           msg.className = "bet-msg err";
@@ -1630,7 +1703,7 @@
     }
 
     init();
-    return { enhanceDetail, decorateCards, confirmBet };
+    return { enhanceDetail, decorateCards, confirmBet, showBetDetail };
   })();
 
   /* ===== 保存长图 ===== */
