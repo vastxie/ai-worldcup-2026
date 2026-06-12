@@ -416,12 +416,21 @@
   .bet-msg.ok { color: var(--lime); }
   .bet-msg.err { color: var(--hot); }
 
-  .card-bets { display: flex; align-items: center; gap: 4px; margin-top: 6px; }
-  .card-bets img, .card-bets .cb-svg { width: 17px; height: 17px; border-radius: 50%;
-    border: 1.5px solid var(--draw); background: var(--panel); }
-  .card-bets .cb-svg { display: inline-flex; align-items: center; justify-content: center;
-    padding: 2px; font-size: 10px; }
+  .card-bets { display: flex; align-items: center; gap: 4px; margin-top: 4px; }
+  .card-bets.cb-H { justify-content: flex-start; padding-left: 30px; }
+  .card-bets.cb-D { justify-content: center; }
+  .card-bets.cb-A { justify-content: flex-end; padding-right: 30px; }
+  .card-bets .cb-svg { width: 17px; height: 17px; border-radius: 50%;
+    border: 1.5px solid var(--draw); background: var(--panel);
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 2px; font-size: 10px; position: relative; }
   .card-bets .cb-svg svg { width: 100%; height: 100%; }
+  .card-bets .cb-svg img { width: 100%; height: 100%; border-radius: 50%; }
+  .card-bets .cb-svg:hover::after { content: attr(data-tip); position: absolute;
+    bottom: calc(100% + 7px); left: 50%; transform: translateX(-50%);
+    background: #0c1811; border: 1px solid var(--line-strong); color: var(--ink);
+    padding: 4px 9px; border-radius: 3px; font-family: var(--mono); font-size: 10.5px;
+    white-space: nowrap; z-index: 40; pointer-events: none; }
 
   /* AI 选手专区 */
   .ag-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
@@ -429,17 +438,26 @@
   .ag-card { border: 1px solid var(--line); border-radius: 4px; padding: 16px 18px;
     background: linear-gradient(165deg, var(--panel-2), var(--panel)); }
   .ag-head { display: flex; align-items: center; gap: 10px; }
+  .ag-head > div { min-width: 0; flex: 1; }
   .ag-icon { width: 30px; height: 30px; border-radius: 50%; background: #15241b;
     display: inline-flex; align-items: center; justify-content: center;
     padding: 5px; flex: none; }
   .ag-icon svg { width: 100%; height: 100%; }
   .ag-name { font-weight: 700; font-size: 15px; }
-  .ag-model { font-family: var(--mono); font-size: 10px; color: var(--faint); }
+  .ag-model { font-family: var(--mono); font-size: 10px; color: var(--faint);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .ag-stats { display: flex; gap: 14px; margin-top: 12px;
     font-family: var(--mono); font-size: 12px; color: var(--dim); }
   .ag-stats b { color: var(--gold); font-size: 16px; display: block; }
   .arena-chart { border: 1px solid var(--line); border-radius: 4px;
     background: rgba(12,24,17,.45); padding: 18px; margin-bottom: 26px; }
+  .arena-chart g.cline { transition: opacity .15s; pointer-events: none; }
+  .arena-chart svg.hovering g.cline:not(.hov) { opacity: .12; }
+  .arena-chart g.cline .cl-vis { fill: none; stroke-width: 2; stroke-linejoin: round; }
+  .arena-chart g.cline.hov .cl-vis { stroke-width: 3; }
+  .arena-chart g.cline .cl-name { opacity: 0; transition: opacity .15s;
+    font-weight: 700; paint-order: stroke; stroke: #0c1811; stroke-width: 4px; }
+  .arena-chart g.cline.hov .cl-name { opacity: 1; }
 
   /* 战报圆桌（AI 跟评） */
   .rc-agents { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
@@ -542,6 +560,8 @@
     .m-teams { grid-template-columns: 1fr 52px 1fr; }
     .m-side { font-size: 13px; gap: 6px; }
     .m-side .flag { font-size: 16px; }
+    .card-bets.cb-H { padding-left: 22px; }
+    .card-bets.cb-A { padding-right: 22px; }
     .m-mid .sc { font-size: 17px; }
     .stat-tiles { grid-template-columns: repeat(2, 1fr); gap: 10px; }
     .stile .sv { font-size: 30px; }
@@ -1119,19 +1139,61 @@
           <div class="ag-card">
             <div class="ag-head">${agentIcon(a.model || a.login)}
               <div><div class="ag-name">${esc(a.name || a.login)}${a.persona ? "" : ' <span class="ai-badge" style="color:var(--gold);border-color:rgba(255,215,94,.4)">本色</span>'}</div>
-                <div class="ag-model">${esc(a.model || "")}</div></div></div>
+                <div class="ag-model" title="${esc(a.model || "")}">${esc(a.model || "")}</div></div></div>
             <div class="ag-stats">
               <span><b>${a.net_worth}</b>净资产</span>
               <span><b>${a.roi == null ? "—" : (a.roi * 100).toFixed(0) + "%"}</b>ROI</span>
               <span><b>${a.wins}/${a.settled_n}</b>胜/结</span>
             </div>
           </div>`).join("")}</div>` + agentChart(A);
+      bindChartHover();
+    }
+
+    // 悬停最近邻高亮：取离鼠标最近的折线（< 14px）加亮并显示名称，其余压暗
+    function bindChartHover() {
+      const svg = document.querySelector(".arena-chart svg");
+      if (!svg) return;
+      const lines = [...svg.querySelectorAll("g.cline")].map(g => ({
+        g, pts: g.dataset.pts.split(" ").map(s => s.split(",").map(Number))
+      }));
+      const d2seg = (p, a, b) => {
+        const vx = b[0] - a[0], vy = b[1] - a[1];
+        const wx = p[0] - a[0], wy = p[1] - a[1];
+        const c1 = vx * wx + vy * wy;
+        if (c1 <= 0) return Math.hypot(wx, wy);
+        const c2 = vx * vx + vy * vy;
+        const t = c1 >= c2 ? 1 : c1 / c2;
+        return Math.hypot(p[0] - a[0] - t * vx, p[1] - a[1] - t * vy);
+      };
+      const clear = () => {
+        svg.classList.remove("hovering");
+        lines.forEach(l => l.g.classList.remove("hov"));
+      };
+      svg.addEventListener("mousemove", e => {
+        const r = svg.getBoundingClientRect();
+        const p = [(e.clientX - r.left) * 760 / r.width,
+                   (e.clientY - r.top) * 200 / r.height];
+        let best = null, bd = 1e9;
+        lines.forEach(l => {
+          let d = Math.hypot(p[0] - l.pts[0][0], p[1] - l.pts[0][1]);
+          for (let i = 0; i + 1 < l.pts.length; i++)
+            d = Math.min(d, d2seg(p, l.pts[i], l.pts[i + 1]));
+          if (d < bd) { bd = d; best = l; }
+        });
+        if (best && bd < 14) {
+          svg.classList.add("hovering");
+          lines.forEach(l => l.g.classList.toggle("hov", l === best));
+        } else clear();
+      });
+      svg.addEventListener("mouseleave", clear);
     }
 
     function agentChart(agents) {
-      const withTl = agents.filter(a => (a.timeline || []).length >= 2);
-      const COLORS = ["#ffd75e", "#b8f53d", "#ff7a52", "#5fd4ff", "#c792ea", "#eaf6ec"];
-      const W = 760, H = 200, PL = 46, PR = 60, PT = 12, PB = 8;
+      const COLORS = ["#ffd75e", "#b8f53d", "#ff7a52", "#5fd4ff", "#c792ea",
+                      "#eaf6ec", "#ffb86b", "#7ee787", "#f97583", "#79c0ff",
+                      "#d2a8ff", "#a5d6a7", "#f0a6ca", "#9cdcfe", "#e3b341",
+                      "#56d4dd"];
+      const W = 760, H = 200, PL = 46, PR = 20, PT = 12, PB = 8;
       let maxV = 1200, maxN = 2;
       agents.forEach(a => (a.timeline || []).forEach(p => { if (p.balance > maxV) maxV = p.balance; }));
       agents.forEach(a => { if ((a.timeline || []).length > maxN) maxN = a.timeline.length; });
@@ -1144,19 +1206,25 @@
         svg += `<line x1="${PL}" y1="${yy}" x2="${W - PR}" y2="${yy}" stroke="rgba(214,255,222,.07)"/>
           <text x="${PL - 6}" y="${yy + 4}" text-anchor="end" font-size="10" fill="#54705c" font-family="IBM Plex Mono">${Math.round(v)}</text>`;
       }
+      // 默认不标名称：悬停某条线时该线高亮并显示名称+当前积分，其余变暗
       agents.forEach((a, ai) => {
         const tl = a.timeline || [];
         if (!tl.length) return;
         const col = COLORS[ai % COLORS.length];
         const pts = tl.map((p, i) => [x(i), y(p.balance)]);
-        if (pts.length > 1)
-          svg += `<polyline points="${pts.map(p => p.join(",")).join(" ")}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round"/>`;
+        const ptStr = pts.map(p => p.map(v => v.toFixed(1)).join(",")).join(" ");
         const last = pts[pts.length - 1];
-        svg += `<circle cx="${last[0]}" cy="${last[1]}" r="3" fill="${col}"/>
-          <text x="${last[0] + 7}" y="${last[1] + 4}" font-size="10" fill="${col}" font-family="IBM Plex Mono">${esc(a.name || a.login)}</text>`;
+        const left = last[0] > W - 150;
+        svg += `<g class="cline" data-pts="${ptStr}">
+          <polyline class="cl-vis" points="${ptStr}" stroke="${col}"/>
+          <circle cx="${last[0]}" cy="${last[1]}" r="3" fill="${col}"/>
+          <text class="cl-name" x="${last[0] + (left ? -9 : 9)}" y="${last[1] + 4}"
+            text-anchor="${left ? "end" : "start"}" font-size="11" fill="${col}"
+            font-family="IBM Plex Mono">${esc(a.name || a.login)} ${tl[tl.length - 1].balance}</text>
+        </g>`;
       });
       svg += "</svg>";
-      return `<div class="arena-chart"><div class="md-title" style="margin-bottom:10px">AI 积分波动</div>${svg}</div>`;
+      return `<div class="arena-chart"><div class="md-title" style="margin-bottom:10px">AI 积分波动 · 悬停查看选手</div>${svg}</div>`;
     }
 
     function postHtml(p, depth, orphanQuote) {
@@ -1259,29 +1327,35 @@
 
     function avatarHtml(b) {
       const cls = "pick" + b.pick;
-      const title = esc((b.kind === "agent" ? "🤖 " : "") + (b.name || b.login || "?"))
-        + ` ${b.stake}@${b.odds}` + (b.reason ? "：" + esc(b.reason) : "");
+      const tip = esc((b.name || b.login || "?") + ` ${b.stake}@${b.odds}`);
+      let inner = "";
       if (b.kind === "agent") {
-        const svg = window.aiIcon ? window.aiIcon(b.model || b.login) : null;
-        return `<span class="cb-svg ${cls}" title="${title}">${svg || "🤖"}</span>`;
+        inner = (window.aiIcon ? window.aiIcon(b.model || b.login) : null) || "AI";
+      } else if (b.avatar_url) {
+        inner = `<img src="${b.avatar_url}" alt="">`;
       }
-      if (b.avatar_url) return `<img class="${cls}" src="${b.avatar_url}" title="${title}">`;
-      return `<span class="cb-svg ${cls}" title="${title}"></span>`;
+      return `<span class="cb-svg ${cls}" data-tip="${tip}">${inner}</span>`;
     }
 
     function decorateCards() {
       if (!S.on) return;
       document.querySelectorAll("#schedule-list .mcard").forEach(card => {
+        card.querySelectorAll(".card-bets").forEach(o => o.remove());
         const no = +card.dataset.match;
-        const old = card.querySelector(".card-bets");
-        if (old) old.remove();
         // 卡片角标只展示 AI 选手的投注；人类投注不上墙
         const bs = (S.byMatch[no] || []).filter(b => b.kind === "agent");
-        if (!bs.length) return;
-        const avatars = bs.slice(0, 6).map(avatarHtml).join("");
-        const more = bs.length > 6 ? `<span class="cb-more">+${bs.length - 6}</span>` : "";
-        card.querySelector(".m-when").insertAdjacentHTML("beforeend",
-          `<span class="card-bets" title="AI 选手已下 ${bs.length} 注">${avatars}${more}</span>`);
+        const teams = card.querySelector(".m-teams");
+        if (!bs.length || !teams) return;
+        // 头像归位到所投方向：主胜在主队下方、平局居中、客胜在客队下方
+        const grp = { H: [], D: [], A: [] };
+        bs.forEach(b => (grp[b.pick] || grp.D).push(b));
+        const cell = k => {
+          const arr = grp[k], cap = 6;
+          const avatars = arr.slice(0, cap).map(avatarHtml).join("");
+          const more = arr.length > cap ? `<span class="cb-more">+${arr.length - cap}</span>` : "";
+          return `<span class="card-bets cb-${k}">${avatars}${more}</span>`;
+        };
+        teams.insertAdjacentHTML("beforeend", cell("H") + cell("D") + cell("A"));
       });
     }
 

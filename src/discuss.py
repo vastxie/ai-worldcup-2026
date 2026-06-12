@@ -106,8 +106,7 @@ def speak(agent_cfg: dict, gw: Gateway, latest_report: dict,
         "你的私有笔记": db.agent_notes_list(me["id"]),
     }, ensure_ascii=False)
 
-    out = gw.chat(agent_cfg["model"], system, user_msg, max_tokens=2500,
-                  agent=agent_cfg["id"])
+    out = gw.chat(agent_cfg["model"], system, user_msg, agent=agent_cfg["id"])
     act = _parse_json(out["text"])
 
     action = str(act.get("action") or "pass").lower()

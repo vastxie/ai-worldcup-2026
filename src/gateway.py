@@ -39,8 +39,9 @@ from pathlib import Path
 from . import db
 
 ROOT = Path(__file__).resolve().parent.parent
-TIMEOUT = 120
+TIMEOUT = 600  # 单次调用 10 分钟上限，输出 token 不设限
 RETRIES = 2
+ANTHROPIC_MAX_TOKENS = 32000  # anthropic 协议必填字段的兜底值，可被 cfg.max_tokens 覆盖
 
 
 def _post(url: str, headers: dict, body: dict) -> dict:
@@ -53,12 +54,14 @@ def _post(url: str, headers: dict, body: dict) -> dict:
 
 # ------------------------------------------------------------- 协议适配器 --
 
-def _call_openai(cfg: dict, system: str, user: str, max_tokens: int,
+def _call_openai(cfg: dict, system: str, user: str, max_tokens: int | None,
                  temperature: float) -> dict:
     body = {"model": cfg["model"],
             "messages": [{"role": "system", "content": system},
                          {"role": "user", "content": user}],
-            "max_tokens": max_tokens, "temperature": temperature}
+            "temperature": temperature}
+    if max_tokens:
+        body["max_tokens"] = max_tokens
     body.update(cfg.get("extra") or {})  # 如 reasoning_effort 等模型特有参数
     out = _post(cfg["base_url"].rstrip("/") + "/chat/completions",
                 {"Authorization": f"Bearer {cfg['api_key']}"}, body)
@@ -68,14 +71,16 @@ def _call_openai(cfg: dict, system: str, user: str, max_tokens: int,
             "completion_tokens": usage.get("completion_tokens", 0)}
 
 
-def _call_anthropic(cfg: dict, system: str, user: str, max_tokens: int,
+def _call_anthropic(cfg: dict, system: str, user: str, max_tokens: int | None,
                     temperature: float) -> dict:
     out = _post(cfg["base_url"].rstrip("/") + "/v1/messages",
                 {"x-api-key": cfg["api_key"],
                  "anthropic-version": "2023-06-01"},
                 {"model": cfg["model"], "system": system,
                  "messages": [{"role": "user", "content": user}],
-                 "max_tokens": max_tokens, "temperature": temperature})
+                 "max_tokens": max_tokens or cfg.get("max_tokens",
+                                                     ANTHROPIC_MAX_TOKENS),
+                 "temperature": temperature})
     text = "".join(b.get("text", "") for b in out.get("content", [])
                    if b.get("type") == "text")
     usage = out.get("usage") or {}
@@ -84,16 +89,18 @@ def _call_anthropic(cfg: dict, system: str, user: str, max_tokens: int,
             "completion_tokens": usage.get("output_tokens", 0)}
 
 
-def _call_gemini(cfg: dict, system: str, user: str, max_tokens: int,
+def _call_gemini(cfg: dict, system: str, user: str, max_tokens: int | None,
                  temperature: float) -> dict:
     url = (cfg["base_url"].rstrip("/")
            + f"/v1beta/models/{cfg['model']}:generateContent"
            + f"?key={cfg['api_key']}")
+    gen_cfg: dict = {"temperature": temperature}
+    if max_tokens:
+        gen_cfg["maxOutputTokens"] = max_tokens
     out = _post(url, {}, {
         "systemInstruction": {"parts": [{"text": system}]},
         "contents": [{"role": "user", "parts": [{"text": user}]}],
-        "generationConfig": {"maxOutputTokens": max_tokens,
-                             "temperature": temperature}})
+        "generationConfig": gen_cfg})
     cand = (out.get("candidates") or [{}])[0]
     text = "".join(p.get("text", "")
                    for p in cand.get("content", {}).get("parts", []))
@@ -103,7 +110,8 @@ def _call_gemini(cfg: dict, system: str, user: str, max_tokens: int,
             "completion_tokens": usage.get("candidatesTokenCount", 0)}
 
 
-def _call_openai_responses(cfg: dict, system: str, user: str, max_tokens: int,
+def _call_openai_responses(cfg: dict, system: str, user: str,
+                           max_tokens: int | None,
                            temperature: float) -> dict:
     """OpenAI Responses 协议（豆包 Ark v3 等，参考 99Agent doubao_responses）。"""
     url = cfg["base_url"].rstrip("/")
@@ -111,8 +119,9 @@ def _call_openai_responses(cfg: dict, system: str, user: str, max_tokens: int,
         url += "/responses"
     body = {"model": cfg["model"],
             "input": [{"role": "system", "content": system},
-                      {"role": "user", "content": user}],
-            "max_output_tokens": max_tokens}
+                      {"role": "user", "content": user}]}
+    if max_tokens:
+        body["max_output_tokens"] = max_tokens
     body.update(cfg.get("extra") or {})
     out = _post(url, {"Authorization": f"Bearer {cfg['api_key']}"}, body)
     text = ""
@@ -127,7 +136,7 @@ def _call_openai_responses(cfg: dict, system: str, user: str, max_tokens: int,
             "completion_tokens": usage.get("output_tokens", 0)}
 
 
-def _call_mock(cfg: dict, system: str, user: str, max_tokens: int,
+def _call_mock(cfg: dict, system: str, user: str, max_tokens: int | None,
                temperature: float) -> dict:
     return {"text": cfg.get("mock_response", "{}"),
             "prompt_tokens": len(system + user) // 4, "completion_tokens": 50}
@@ -150,8 +159,9 @@ class Gateway:
                  "model": m.get("model", "")} for m in self.models.values()]
 
     def chat(self, model_id: str, system: str, user: str,
-             max_tokens: int = 2000, temperature: float = 0.7,
+             max_tokens: int | None = None, temperature: float = 0.7,
              agent: str = "") -> dict:
+        """max_tokens 默认不设限（推理模型耗 token 不可控），靠 TIMEOUT 兜底。"""
         cfg = self.models.get(model_id)
         if not cfg:
             raise KeyError(f"网关未配置模型: {model_id}")
