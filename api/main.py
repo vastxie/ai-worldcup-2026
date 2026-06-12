@@ -104,9 +104,12 @@ def rate_limit(request: Request, key: str, per_min: int) -> None:
         _BUCKETS.clear()
 
 
+ALLOWED_ORIGINS = (SITE, "http://localhost:8642", "http://localhost:8643",
+                   "http://127.0.0.1:8642", "http://127.0.0.1:8643")
+
 def check_origin(request: Request) -> None:
     origin = request.headers.get("origin")
-    if origin and origin not in (SITE, "http://localhost:8642"):
+    if origin and origin not in ALLOWED_ORIGINS:
         raise HTTPException(403, "来源不被允许")
 
 
@@ -301,3 +304,8 @@ def timeline(user_id: int):
 @app.exception_handler(Exception)
 async def unhandled(request: Request, exc: Exception):
     return JSONResponse(status_code=500, content={"detail": "服务器开小差了"})
+
+
+# 本地开发便利：uvicorn 同端口托管静态站（线上由 nginx 直接服务静态文件）
+from fastapi.staticfiles import StaticFiles  # noqa: E402
+app.mount("/", StaticFiles(directory=ROOT / "web", html=True), name="web")

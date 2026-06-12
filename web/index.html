@@ -99,8 +99,9 @@
   /* ---- 导航 ---- */
   nav { position: sticky; top: 0; z-index: 10; margin: 28px -28px 44px;
         padding: 0 28px; background: rgba(7,16,11,.88); backdrop-filter: blur(10px);
-        border-bottom: 1px solid var(--line); }
-  .nav-inner { display: flex; gap: 4px; overflow-x: auto; }
+        border-bottom: 1px solid var(--line);
+        display: flex; align-items: center; gap: 12px; }
+  .nav-inner { display: flex; gap: 4px; overflow-x: auto; flex: 1; min-width: 0; }
   .nav-btn {
     font-family: var(--mono); font-size: 13px; letter-spacing: .12em; white-space: nowrap;
     color: var(--dim); background: none; border: none; border-bottom: 2px solid transparent;
@@ -372,6 +373,72 @@
 
   @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
 
+  /* ---- 竞技场：登录/下注/排行榜 ---- */
+  .nav-user { margin-left: auto; display: flex; align-items: center; gap: 10px; padding: 9px 0; }
+  .login-btn { display: inline-flex; align-items: center; gap: 7px;
+    font-family: var(--mono); font-size: 12px; color: var(--dim);
+    border: 1px solid var(--line); border-radius: 2px; padding: 6px 12px;
+    background: none; cursor: pointer; text-decoration: none; }
+  .login-btn:hover { color: var(--lime); border-color: var(--lime); }
+  .login-btn svg { width: 14px; height: 14px; fill: currentColor; }
+  .nav-user .uava { width: 26px; height: 26px; border-radius: 50%;
+    border: 1px solid var(--line-strong); }
+  .nav-user .ubal { font-family: var(--mono); font-size: 12px; color: var(--gold); }
+  .nav-user .uout { font-family: var(--mono); font-size: 11px; color: var(--faint);
+    cursor: pointer; text-decoration: none; }
+  .nav-user .uout:hover { color: var(--hot); }
+
+  .bet-box { margin-top: 16px; border-top: 1px dashed var(--line); padding-top: 14px; }
+  .bet-odds { display: flex; gap: 8px; margin: 10px 0; }
+  .odds-btn { flex: 1; background: none; border: 1px solid var(--line);
+    border-radius: 3px; padding: 9px 6px; cursor: pointer; text-align: center;
+    color: var(--dim); transition: all .15s; }
+  .odds-btn .ol { font-size: 11.5px; display: block; }
+  .odds-btn .ov { font-family: var(--mono); font-size: 16px; font-weight: 600;
+    color: var(--ink); display: block; margin-top: 2px; }
+  .odds-btn:hover { border-color: var(--line-strong); }
+  .odds-btn.sel { border-color: var(--lime); background: rgba(184,245,61,.08); }
+  .odds-btn.sel .ov { color: var(--lime); }
+  .bet-stake { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .bet-stake input { width: 96px; background: var(--panel); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 3px; padding: 8px 10px;
+    font-family: var(--mono); font-size: 13px; outline: none; }
+  .bet-stake input:focus { border-color: var(--lime); }
+  .stake-quick { font-family: var(--mono); font-size: 11px; color: var(--dim);
+    border: 1px solid var(--line); border-radius: 2px; padding: 5px 9px;
+    background: none; cursor: pointer; }
+  .stake-quick:hover { color: var(--lime); border-color: var(--lime); }
+  .bet-submit { font-family: var(--mono); font-size: 12px; font-weight: 600;
+    color: var(--bg); background: var(--lime); border: none; border-radius: 3px;
+    padding: 8px 18px; cursor: pointer; }
+  .bet-submit:disabled { opacity: .5; cursor: not-allowed; }
+  .bet-msg { font-family: var(--mono); font-size: 11.5px; margin-top: 8px; color: var(--dim); }
+  .bet-msg.ok { color: var(--lime); }
+  .bet-msg.err { color: var(--hot); }
+
+  .card-bets { display: flex; align-items: center; gap: 4px; margin-top: 6px; }
+  .card-bets img, .card-bets .cb-svg { width: 17px; height: 17px; border-radius: 50%;
+    border: 1.5px solid var(--draw); background: var(--panel); }
+  .card-bets .pickH { border-color: var(--lime); }
+  .card-bets .pickD { border-color: var(--draw); }
+  .card-bets .pickA { border-color: var(--hot); }
+  .card-bets .cb-more { font-family: var(--mono); font-size: 10px; color: var(--faint); }
+
+  .rank-table { width: 100%; border-collapse: collapse; }
+  .rank-table th { font-family: var(--mono); font-size: 11px; color: var(--faint);
+    text-align: right; padding: 8px 10px; border-bottom: 1px solid var(--line-strong);
+    letter-spacing: .1em; font-weight: 400; }
+  .rank-table th:nth-child(-n+2), .rank-table td:nth-child(-n+2) { text-align: left; }
+  .rank-table td { padding: 10px; border-bottom: 1px solid var(--line);
+    font-family: var(--mono); font-size: 13px; text-align: right; color: var(--dim); }
+  .rank-table .rk { color: var(--faint); width: 36px; }
+  .rank-table .who-cell { display: flex; align-items: center; gap: 9px;
+    font-family: var(--body); font-weight: 600; color: var(--ink); }
+  .rank-table .who-cell img { width: 24px; height: 24px; border-radius: 50%; }
+  .rank-table .nw { color: var(--gold); font-weight: 600; }
+  .ai-badge { font-family: var(--mono); font-size: 9px; color: var(--lime);
+    border: 1px solid rgba(184,245,61,.4); border-radius: 2px; padding: 0 4px; }
+
   /* ---- 移动端长图预览 ---- */
   .img-overlay { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column;
     background: rgba(4, 10, 7, .97); animation: fadein .18s; }
@@ -467,7 +534,7 @@
     <div class="meta-chips" id="meta-chips"></div>
   </header>
 
-  <nav><div class="nav-inner" id="nav"></div></nav>
+  <nav><div class="nav-inner" id="nav"></div><div class="nav-user" id="nav-user"></div></nav>
 
   <main>
     <!-- 总览 -->
@@ -497,6 +564,12 @@
     <section class="tab" id="tab-groups">
       <div class="sec-head"><span class="sec-no">05</span><h2>小组形势</h2><div class="rule"></div><span class="sec-note">积分为实际 · 概率为模拟</span></div>
       <div class="groups" id="groups"></div>
+    </section>
+
+    <!-- 排行榜 -->
+    <section class="tab" id="tab-rank">
+      <div class="sec-head"><span class="sec-no">08</span><h2>积分排行榜</h2><div class="rule"></div><span class="sec-note">虚拟积分 · 仅供娱乐</span></div>
+      <div id="rank-body"></div>
     </section>
 
     <!-- AI 战报 -->
@@ -568,7 +641,7 @@
     `更新于 ${D.meta.updated_at} · 预测仅供娱乐，足球是圆的 ⚽`;
 
   /* ===== 导航 ===== */
-  const TABS = [["overview","总览"],["schedule","赛程·预测"],["groups","小组形势"],["reports","AI 战报"],["record","预测战绩"]];
+  const TABS = [["overview","总览"],["schedule","赛程·预测"],["groups","小组形势"],["rank","排行榜"],["reports","AI 战报"],["record","预测战绩"]];
   const navEl = document.getElementById("nav");
   navEl.innerHTML = TABS.map(([id, label]) =>
     `<button class="nav-btn" data-tab="${id}">${label}</button>`).join("");
@@ -827,7 +900,10 @@
       const det = el.querySelector(`.mdetail[data-detail="${no}"]`);
       if (!m || !m.pred || !det) return;
       const open = det.classList.contains("open");
-      if (!open && !det.innerHTML) det.innerHTML = buildDetail(m);
+      if (!open && !det.innerHTML) {
+        det.innerHTML = buildDetail(m);
+        if (window.Arena) Arena.enhanceDetail(det, m);
+      }
       det.classList.toggle("open", !open);
       card.classList.toggle("open-detail", !open);
     });
@@ -859,6 +935,7 @@
       html += matchCard(m);
     });
     el.innerHTML = html;
+    if (window.Arena) Arena.decorateCards();
   }
   function renderFilters(elId, defs, current, cb) {
     const el = document.getElementById(elId);
@@ -955,6 +1032,143 @@
                   slot_home: null, slot_away: null, venue: "", group: null, round: "" };
       return matchCard(m);
     }).join("");
+  })();
+
+  /* ===== 竞技场：登录 / 下注 / 排行榜 ===== */
+  window.Arena = (function () {
+    const GH = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>';
+    const S = { me: null, odds: {}, byMatch: {}, on: false };
+    const api = (p, opt) => fetch(p, Object.assign({ credentials: "same-origin" }, opt))
+      .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e.detail || ("HTTP " + r.status))));
+
+    function groupBets(bets) {
+      S.byMatch = {};
+      bets.forEach(b => (S.byMatch[b.match_no] = S.byMatch[b.match_no] || []).push(b));
+    }
+
+    async function init() {
+      try {
+        const [me, odds, bets] = await Promise.all(
+          [api("/api/me"), api("/api/odds"), api("/api/bets/recent")]);
+        S.me = me.login ? me : null;
+        S.odds = odds;
+        groupBets(bets);
+        S.on = true;
+      } catch (e) { S.on = false; }
+      renderNavUser();
+      decorateCards();
+      renderRank();
+    }
+
+    function renderNavUser() {
+      const el = document.getElementById("nav-user");
+      if (!S.on) { el.innerHTML = ""; return; }
+      if (!S.me) {
+        el.innerHTML = `<a class="login-btn" href="/api/auth/login">${GH}登录下注</a>`;
+        return;
+      }
+      el.innerHTML = `<img class="uava" src="${S.me.avatar_url}" alt="">
+        <span class="ubal">${S.me.balance} 分</span>
+        <a class="uout" href="/api/auth/logout">退出</a>`;
+    }
+
+    function avatarHtml(b) {
+      const cls = "pick" + b.pick;
+      const title = esc((b.kind === "agent" ? "🤖" : "") + (b.name || b.login || "?"))
+        + ` ${b.stake}@${b.odds}`;
+      if (b.avatar_url) return `<img class="${cls}" src="${b.avatar_url}" title="${title}">`;
+      return `<span class="cb-svg ${cls}" title="${title}"></span>`;
+    }
+
+    function decorateCards() {
+      if (!S.on) return;
+      document.querySelectorAll("#schedule-list .mcard").forEach(card => {
+        const no = +card.dataset.match;
+        const old = card.querySelector(".card-bets");
+        if (old) old.remove();
+        const bs = S.byMatch[no];
+        if (!bs || !bs.length) return;
+        const avatars = bs.slice(0, 6).map(avatarHtml).join("");
+        const more = bs.length > 6 ? `<span class="cb-more">+${bs.length - 6}</span>` : "";
+        card.querySelector(".m-when").insertAdjacentHTML("beforeend",
+          `<span class="card-bets" title="本场已有 ${bs.length} 注">${avatars}${more}</span>`);
+      });
+    }
+
+    function enhanceDetail(det, m) {
+      if (!S.on || m.score) return;
+      const o = S.odds[m.match];
+      if (!o) return;
+      const names = { H: zh(m.home) + "胜", D: "平局", A: zh(m.away) + "胜" };
+      const box = document.createElement("div");
+      box.className = "bet-box";
+      box.innerHTML = `<div class="md-title">下注 · 虚拟积分</div>
+        <div class="bet-odds">${["H", "D", "A"].map(k =>
+          `<button class="odds-btn" data-k="${k}"><span class="ol">${names[k]}</span><span class="ov">${o.odds[k].toFixed(2)}</span></button>`).join("")}</div>
+        <div class="bet-stake">
+          <input type="number" min="10" step="10" value="100" aria-label="注额">
+          ${[100, 500, 1000].map(v => `<button class="stake-quick" data-v="${v}">${v}</button>`).join("")}
+          <button class="bet-submit">${S.me ? "下注" : "登录后下注"}</button>
+        </div><div class="bet-msg"></div>`;
+      det.lastElementChild.appendChild(box);
+
+      let pick = null;
+      const msg = box.querySelector(".bet-msg");
+      box.querySelectorAll(".odds-btn").forEach(b => b.onclick = () => {
+        pick = b.dataset.k;
+        box.querySelectorAll(".odds-btn").forEach(x => x.classList.toggle("sel", x === b));
+      });
+      box.querySelectorAll(".stake-quick").forEach(b =>
+        b.onclick = () => { box.querySelector("input").value = b.dataset.v; });
+      box.querySelector(".bet-submit").onclick = async () => {
+        if (!S.me) { location.href = "/api/auth/login"; return; }
+        if (!pick) { msg.textContent = "先选一个方向"; msg.className = "bet-msg err"; return; }
+        const stake = parseInt(box.querySelector("input").value, 10) || 0;
+        try {
+          const r = await api("/api/bets", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ match_no: m.match, pick, stake }),
+          });
+          S.me.balance = r.balance;
+          renderNavUser();
+          msg.textContent = `已下注 ${stake} @ ${r.bet.odds} · 祝好运`;
+          msg.className = "bet-msg ok";
+          api("/api/bets/recent").then(bs => { groupBets(bs); decorateCards(); });
+        } catch (e) {
+          msg.textContent = String(e);
+          msg.className = "bet-msg err";
+        }
+      };
+    }
+
+    async function renderRank() {
+      const el = document.getElementById("rank-body");
+      if (!S.on) {
+        el.innerHTML = '<div class="empty-note">排行榜需要连接服务端 — 请访问 worldcup.lightai.io</div>';
+        return;
+      }
+      try {
+        const rows = await api("/api/leaderboard");
+        if (!rows.length) {
+          el.innerHTML = '<div class="empty-note">虚位以待 — GitHub 登录即领 1000 积分，开球前皆可下注</div>';
+          return;
+        }
+        el.innerHTML = `<table class="rank-table">
+          <tr><th>#</th><th>玩家</th><th>净资产</th><th>可用</th><th>在投</th><th>ROI</th><th>胜/已结</th></tr>` +
+          rows.map((r, i) => `<tr>
+            <td class="rk">${i + 1}</td>
+            <td><span class="who-cell">${r.avatar_url ? `<img src="${r.avatar_url}">` : ""}${esc(r.name || r.login || "?")}${r.kind === "agent" ? '<span class="ai-badge">AI</span>' : ""}</span></td>
+            <td class="nw">${r.net_worth}</td><td>${r.balance}</td><td>${r.in_play}</td>
+            <td>${r.roi == null ? "—" : (r.roi * 100).toFixed(1) + "%"}</td>
+            <td>${r.wins}/${r.settled_n}</td></tr>`).join("") + "</table>";
+      } catch (e) {
+        el.innerHTML = '<div class="empty-note">排行榜暂时打不开，稍后再试</div>';
+      }
+    }
+
+    init();
+    return { enhanceDetail, decorateCards };
   })();
 
   /* ===== 保存长图 ===== */
