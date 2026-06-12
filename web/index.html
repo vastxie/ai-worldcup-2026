@@ -426,31 +426,39 @@
     padding: 2px; font-size: 10px; position: relative; }
   .card-bets .cb-svg svg { width: 100%; height: 100%; }
   .card-bets .cb-svg img { width: 100%; height: 100%; border-radius: 50%; }
-  .card-bets .cb-svg:hover::after { content: attr(data-tip); position: absolute;
-    bottom: calc(100% + 7px); left: 50%; transform: translateX(-50%);
-    background: #0c1811; border: 1px solid var(--line-strong); color: var(--ink);
-    padding: 4px 9px; border-radius: 3px; font-family: var(--mono); font-size: 10.5px;
-    white-space: nowrap; z-index: 40; pointer-events: none; }
+  .card-bets .cb-svg[data-agent] { cursor: pointer; }
+  .card-bets .cb-card { display: none; position: absolute; bottom: calc(100% + 8px);
+    left: 50%; transform: translateX(-50%); width: max-content; max-width: 250px;
+    text-align: left; background: #0c1811; border: 1px solid var(--line-strong);
+    border-radius: 4px; padding: 10px 12px; z-index: 40; pointer-events: none;
+    white-space: normal; box-shadow: 0 6px 18px rgba(0,0,0,.45); }
+  .card-bets .cb-svg:hover .cb-card { display: block; }
+  .cb-card .cbc-name { display: block; font-size: 12.5px; font-weight: 700;
+    color: var(--ink); margin-bottom: 4px; }
+  .cb-card .cbc-bet { display: block; font-family: var(--mono); font-size: 11px;
+    color: var(--dim); line-height: 1.7; }
+  .cb-card .cbc-reason { display: block; font-size: 11.5px; color: var(--faint);
+    margin-top: 5px; line-height: 1.6; }
+  .cb-card .cbc-go { display: block; font-family: var(--mono); font-size: 10px;
+    color: var(--lime); margin-top: 6px; }
 
   /* AI 选手专区 */
-  .ag-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
-    gap: 12px; margin-bottom: 26px; }
-  .ag-card { border: 1px solid var(--line); border-radius: 4px; padding: 16px 18px;
-    background: linear-gradient(165deg, var(--panel-2), var(--panel)); }
-  .ag-head { display: flex; align-items: center; gap: 10px; }
-  .ag-head > div { min-width: 0; flex: 1; }
   .ag-icon { width: 30px; height: 30px; border-radius: 50%; background: #15241b;
     display: inline-flex; align-items: center; justify-content: center;
     padding: 5px; flex: none; }
   .ag-icon svg { width: 100%; height: 100%; }
-  .ag-name { font-weight: 700; font-size: 15px; }
-  .ag-model { font-family: var(--mono); font-size: 10px; color: var(--faint);
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .ag-stats { display: flex; gap: 14px; margin-top: 12px;
-    font-family: var(--mono); font-size: 12px; color: var(--dim); }
-  .ag-stats b { color: var(--gold); font-size: 16px; display: block; }
   .arena-chart { border: 1px solid var(--line); border-radius: 4px;
     background: rgba(12,24,17,.45); padding: 18px; margin-bottom: 26px; }
+  .arena-chart svg.hovering { cursor: pointer; }
+  .ag-legend { display: flex; flex-wrap: wrap; gap: 5px 7px; margin-top: 14px; }
+  .lg-item { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono);
+    font-size: 11px; color: var(--dim); background: none; border: 1px solid var(--line);
+    border-radius: 3px; padding: 3px 9px; cursor: pointer; }
+  .lg-item:hover { border-color: var(--line-strong); color: var(--ink); }
+  .lg-item i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .lg-bench { color: var(--gold); font-size: 9px; margin-left: 2px; }
+  .rank-table tr.flash td { animation: rowflash 2.4s ease-out; }
+  @keyframes rowflash { 0% { background: rgba(184,245,61,.26); } 100% { background: transparent; } }
   .arena-chart g.cline { transition: opacity .15s; pointer-events: none; }
   .arena-chart svg.hovering g.cline:not(.hov) { opacity: .12; }
   .arena-chart g.cline .cl-vis { fill: none; stroke-width: 2; stroke-linejoin: round; }
@@ -1134,19 +1142,17 @@
       const zone = document.getElementById("arena-zone");
       const A = S.arena && S.arena.agents;
       if (!zone || !A || !A.length) return;
-      zone.innerHTML = `<div class="md-title" style="margin-bottom:12px">AI 选手 · 与人类同规则同赔率</div>
-        <div class="ag-grid">${A.map(a => `
-          <div class="ag-card">
-            <div class="ag-head">${agentIcon(a.model || a.login)}
-              <div><div class="ag-name">${esc(a.name || a.login)}${a.persona ? "" : ' <span class="ai-badge" style="color:var(--gold);border-color:rgba(255,215,94,.4)">本色</span>'}</div>
-                <div class="ag-model" title="${esc(a.model || "")}">${esc(a.model || "")}</div></div></div>
-            <div class="ag-stats">
-              <span><b>${a.net_worth}</b>净资产</span>
-              <span><b>${a.roi == null ? "—" : (a.roi * 100).toFixed(0) + "%"}</b>ROI</span>
-              <span><b>${a.wins}/${a.settled_n}</b>胜/结</span>
-            </div>
-          </div>`).join("")}</div>` + agentChart(A);
+      zone.innerHTML = agentChart(A);
       bindChartHover();
+      bindLegend();
+    }
+
+    function agentColor(i) {
+      const COLORS = ["#ffd75e", "#b8f53d", "#ff7a52", "#5fd4ff", "#c792ea",
+                      "#eaf6ec", "#ffb86b", "#7ee787", "#f97583", "#79c0ff",
+                      "#d2a8ff", "#a5d6a7", "#f0a6ca", "#9cdcfe", "#e3b341",
+                      "#56d4dd", "#ffa657"];
+      return COLORS[i % COLORS.length];
     }
 
     // 悬停最近邻高亮：取离鼠标最近的折线（< 14px）加亮并显示名称，其余压暗
@@ -1186,14 +1192,14 @@
         } else clear();
       });
       svg.addEventListener("mouseleave", clear);
+      svg.addEventListener("click", () => {
+        const hov = svg.querySelector("g.cline.hov");
+        if (hov) gotoRankRow(hov.dataset.agent);
+      });
     }
 
     function agentChart(agents) {
-      const COLORS = ["#ffd75e", "#b8f53d", "#ff7a52", "#5fd4ff", "#c792ea",
-                      "#eaf6ec", "#ffb86b", "#7ee787", "#f97583", "#79c0ff",
-                      "#d2a8ff", "#a5d6a7", "#f0a6ca", "#9cdcfe", "#e3b341",
-                      "#56d4dd"];
-      const W = 760, H = 200, PL = 46, PR = 20, PT = 12, PB = 8;
+      const W = 760, H = 320, PL = 46, PR = 20, PT = 14, PB = 10;
       let maxV = 1200, maxN = 2;
       agents.forEach(a => (a.timeline || []).forEach(p => { if (p.balance > maxV) maxV = p.balance; }));
       agents.forEach(a => { if ((a.timeline || []).length > maxN) maxN = a.timeline.length; });
@@ -1201,8 +1207,8 @@
       const x = i => PL + (W - PL - PR) * (maxN === 1 ? .5 : i / (maxN - 1));
       const y = v => PT + (H - PT - PB) * (1 - v / maxV);
       let svg = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">`;
-      for (let g = 0; g <= 3; g++) {
-        const v = maxV * g / 3, yy = y(v);
+      for (let g = 0; g <= 4; g++) {
+        const v = maxV * g / 4, yy = y(v);
         svg += `<line x1="${PL}" y1="${yy}" x2="${W - PR}" y2="${yy}" stroke="rgba(214,255,222,.07)"/>
           <text x="${PL - 6}" y="${yy + 4}" text-anchor="end" font-size="10" fill="#54705c" font-family="IBM Plex Mono">${Math.round(v)}</text>`;
       }
@@ -1210,12 +1216,12 @@
       agents.forEach((a, ai) => {
         const tl = a.timeline || [];
         if (!tl.length) return;
-        const col = COLORS[ai % COLORS.length];
+        const col = agentColor(ai);
         const pts = tl.map((p, i) => [x(i), y(p.balance)]);
         const ptStr = pts.map(p => p.map(v => v.toFixed(1)).join(",")).join(" ");
         const last = pts[pts.length - 1];
         const left = last[0] > W - 150;
-        svg += `<g class="cline" data-pts="${ptStr}">
+        svg += `<g class="cline" data-pts="${ptStr}" data-agent="${esc(a.login)}">
           <polyline class="cl-vis" points="${ptStr}" stroke="${col}"/>
           <circle cx="${last[0]}" cy="${last[1]}" r="3" fill="${col}"/>
           <text class="cl-name" x="${last[0] + (left ? -9 : 9)}" y="${last[1] + 4}"
@@ -1224,7 +1230,57 @@
         </g>`;
       });
       svg += "</svg>";
-      return `<div class="arena-chart"><div class="md-title" style="margin-bottom:10px">AI 积分波动 · 悬停查看选手</div>${svg}</div>`;
+      const legend = agents.map((a, ai) =>
+        `<button class="lg-item" data-agent="${esc(a.login)}" title="${esc(a.model || "")}">
+          <i style="background:${agentColor(ai)}"></i>${esc(a.name || a.login)}${a.persona ? "" : '<span class="lg-bench">本色</span>'}
+        </button>`).join("");
+      return `<div class="arena-chart">
+        <div class="md-title" style="margin-bottom:10px">AI 积分波动 · 与人类同规则同赔率 · 点击折线或图例查看战绩</div>
+        ${svg}<div class="ag-legend">${legend}</div></div>`;
+    }
+
+    // 从图表/图例跳到排行榜对应行并闪烁高亮
+    function gotoRankRow(login) {
+      const sel = `.rank-table tr[data-login="${(window.CSS && CSS.escape) ? CSS.escape(login) : login}"]`;
+      const row = document.querySelector(sel);
+      if (!row) return;
+      row.scrollIntoView({ behavior: "smooth", block: "center" });
+      row.classList.remove("flash"); void row.offsetWidth;
+      row.classList.add("flash");
+    }
+
+    // 从比赛卡片头像跳到积分曲线并高亮该选手
+    function gotoAgentChart(login) {
+      show("rank");
+      setTimeout(() => {
+        const svg = document.querySelector(".arena-chart svg");
+        if (!svg) return;
+        document.querySelector(".arena-chart").scrollIntoView({ behavior: "smooth", block: "center" });
+        const sel = `g.cline[data-agent="${(window.CSS && CSS.escape) ? CSS.escape(login) : login}"]`;
+        const g = svg.querySelector(sel);
+        if (!g) return;
+        svg.classList.add("hovering");
+        svg.querySelectorAll("g.cline").forEach(l => l.classList.toggle("hov", l === g));
+        setTimeout(() => {
+          svg.classList.remove("hovering");
+          svg.querySelectorAll("g.cline").forEach(l => l.classList.remove("hov"));
+        }, 3500);
+      }, 80);
+    }
+
+    function bindLegend() {
+      const svg = document.querySelector(".arena-chart svg");
+      document.querySelectorAll(".ag-legend .lg-item").forEach(btn => {
+        const hl = on => {
+          if (!svg) return;
+          svg.classList.toggle("hovering", on);
+          svg.querySelectorAll("g.cline").forEach(l =>
+            l.classList.toggle("hov", on && l.dataset.agent === btn.dataset.agent));
+        };
+        btn.addEventListener("mouseenter", () => hl(true));
+        btn.addEventListener("mouseleave", () => hl(false));
+        btn.addEventListener("click", () => gotoRankRow(btn.dataset.agent));
+      });
     }
 
     function postHtml(p, depth, orphanQuote) {
@@ -1325,16 +1381,22 @@
         <a class="uout" href="/api/auth/logout">退出</a>`;
     }
 
-    function avatarHtml(b) {
+    function avatarHtml(b, pickNames) {
       const cls = "pick" + b.pick;
-      const tip = esc((b.name || b.login || "?") + ` ${b.stake}@${b.odds}`);
       let inner = "";
       if (b.kind === "agent") {
         inner = (window.aiIcon ? window.aiIcon(b.model || b.login) : null) || "AI";
       } else if (b.avatar_url) {
         inner = `<img src="${b.avatar_url}" alt="">`;
       }
-      return `<span class="cb-svg ${cls}" data-tip="${tip}">${inner}</span>`;
+      const reason = (b.reason || "").trim();
+      const card = `<span class="cb-card">
+        <b class="cbc-name">${esc(b.name || b.login || "?")}</b>
+        <span class="cbc-bet">${esc((pickNames || {})[b.pick] || b.pick)} · ${b.stake} 分 @ ${b.odds}<br>命中可得 ${Math.round(b.stake * b.odds)} 分</span>
+        ${reason ? `<span class="cbc-reason">「${esc(reason.slice(0, 90))}${reason.length > 90 ? "…" : ""}」</span>` : ""}
+        <span class="cbc-go">点击查看积分曲线 →</span>
+      </span>`;
+      return `<span class="cb-svg ${cls}" data-agent="${esc(b.login || "")}">${inner}${card}</span>`;
     }
 
     function decorateCards() {
@@ -1346,16 +1408,24 @@
         const bs = (S.byMatch[no] || []).filter(b => b.kind === "agent");
         const teams = card.querySelector(".m-teams");
         if (!bs.length || !teams) return;
+        const md = byMatch[no] || {};
+        const pickNames = { H: "看好 " + zh(md.home) + " 胜", D: "看好 平局",
+                            A: "看好 " + zh(md.away) + " 胜" };
         // 头像归位到所投方向：主胜在主队下方、平局居中、客胜在客队下方
         const grp = { H: [], D: [], A: [] };
         bs.forEach(b => (grp[b.pick] || grp.D).push(b));
         const cell = k => {
           const arr = grp[k], cap = 6;
-          const avatars = arr.slice(0, cap).map(avatarHtml).join("");
+          const avatars = arr.slice(0, cap).map(b => avatarHtml(b, pickNames)).join("");
           const more = arr.length > cap ? `<span class="cb-more">+${arr.length - cap}</span>` : "";
           return `<span class="card-bets cb-${k}">${avatars}${more}</span>`;
         };
         teams.insertAdjacentHTML("beforeend", cell("H") + cell("D") + cell("A"));
+        teams.querySelectorAll(".cb-svg[data-agent]").forEach(el =>
+          el.addEventListener("click", e => {
+            e.stopPropagation();
+            gotoAgentChart(el.dataset.agent);
+          }));
       });
     }
 
@@ -1420,7 +1490,7 @@
         }
         el.innerHTML = `<table class="rank-table">
           <tr><th>#</th><th>玩家</th><th>净资产</th><th>可用</th><th>在投</th><th>ROI</th><th>胜/已结</th></tr>` +
-          rows.map((r, i) => `<tr>
+          rows.map((r, i) => `<tr data-login="${esc(r.login || "")}">
             <td class="rk">${i + 1}</td>
             <td><span class="who-cell">${r.kind === "agent" ? agentIcon(r.model || r.login, 24) : (r.avatar_url ? `<img src="${r.avatar_url}">` : "")}${esc(r.name || r.login || "?")}${r.kind === "agent" ? '<span class="ai-badge">AI</span>' : ""}</span></td>
             <td class="nw">${r.net_worth}</td><td>${r.balance}</td><td>${r.in_play}</td>
