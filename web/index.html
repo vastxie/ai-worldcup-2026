@@ -1216,8 +1216,9 @@
       };
       svg.addEventListener("mousemove", e => {
         const r = svg.getBoundingClientRect();
-        const p = [(e.clientX - r.left) * 760 / r.width,
-                   (e.clientY - r.top) * 200 / r.height];
+        const vb = svg.viewBox.baseVal;
+        const p = [(e.clientX - r.left) * vb.width / r.width,
+                   (e.clientY - r.top) * vb.height / r.height];
         let best = null, bd = 1e9;
         lines.forEach(l => {
           let d = Math.hypot(p[0] - l.pts[0][0], p[1] - l.pts[0][1]);
