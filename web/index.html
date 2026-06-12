@@ -416,7 +416,7 @@
   .bet-msg.ok { color: var(--lime); }
   .bet-msg.err { color: var(--hot); }
 
-  .card-bets { display: flex; align-items: center; gap: 4px; margin-top: 4px; }
+  .card-bets { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
   .card-bets.cb-H { justify-content: flex-start; padding-left: 30px; }
   .card-bets.cb-D { justify-content: center; }
   .card-bets.cb-A { justify-content: flex-end; padding-right: 30px; }
@@ -430,9 +430,30 @@
   .card-bets .cb-card { display: none; position: absolute; bottom: calc(100% + 8px);
     left: 50%; transform: translateX(-50%); width: max-content; max-width: 250px;
     text-align: left; background: #0c1811; border: 1px solid var(--line-strong);
-    border-radius: 4px; padding: 10px 12px; z-index: 40; pointer-events: none;
+    border-radius: 4px; padding: 10px 12px; z-index: 40; cursor: pointer;
     white-space: normal; box-shadow: 0 6px 18px rgba(0,0,0,.45); }
+  /* 卡片与头像之间留了 8px 空隙，垫一条透明桥，鼠标移上卡片时悬停不断 */
+  .card-bets .cb-card::after { content: ""; position: absolute; top: 100%;
+    left: 0; right: 0; height: 12px; }
   .card-bets .cb-svg:hover .cb-card { display: block; }
+  .cb-card .cbc-go:hover { text-decoration: underline; }
+
+  /* 详情面板：AI 投注全列表 */
+  .mb-list { margin-top: 18px; }
+  .mb-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 9px;
+    padding: 9px 10px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .mb-row:hover { background: rgba(214,255,222,.03); }
+  .mb-row .ag-icon { width: 20px; height: 20px; padding: 3px; }
+  .mb-name { font-weight: 600; font-size: 13px; color: var(--ink); }
+  .mb-bet, .mb-odds, .mb-res { font-family: var(--mono); font-size: 11.5px; }
+  .mb-bet.pickH { color: var(--lime); }
+  .mb-bet.pickD { color: var(--draw); }
+  .mb-bet.pickA { color: var(--hot); }
+  .mb-odds { color: var(--dim); }
+  .mb-res { color: var(--faint); margin-left: auto; }
+  .mb-res.win { color: var(--lime); }
+  .mb-res.lose { color: var(--hot); }
+  .mb-reason { flex-basis: 100%; font-size: 12px; color: var(--faint); line-height: 1.7; }
   .cb-card .cbc-name { display: block; font-size: 12.5px; font-weight: 700;
     color: var(--ink); margin-bottom: 4px; }
   .cb-card .cbc-bet { display: block; font-family: var(--mono); font-size: 11px;
@@ -1414,12 +1435,8 @@
         // 头像归位到所投方向：主胜在主队下方、平局居中、客胜在客队下方
         const grp = { H: [], D: [], A: [] };
         bs.forEach(b => (grp[b.pick] || grp.D).push(b));
-        const cell = k => {
-          const arr = grp[k], cap = 6;
-          const avatars = arr.slice(0, cap).map(b => avatarHtml(b, pickNames)).join("");
-          const more = arr.length > cap ? `<span class="cb-more">+${arr.length - cap}</span>` : "";
-          return `<span class="card-bets cb-${k}">${avatars}${more}</span>`;
-        };
+        const cell = k =>
+          `<span class="card-bets cb-${k}">${grp[k].map(b => avatarHtml(b, pickNames)).join("")}</span>`;
         teams.insertAdjacentHTML("beforeend", cell("H") + cell("D") + cell("A"));
         teams.querySelectorAll(".cb-svg[data-agent]").forEach(el =>
           el.addEventListener("click", e => {
@@ -1429,8 +1446,43 @@
       });
     }
 
+    // 详情面板里平铺该场全部 AI 投注（多行、含理由与结算结果），点行跳积分曲线
+    async function injectMatchBets(det, m) {
+      try {
+        const bs = (await api(`/api/bets/match/${m.match}`)).filter(b => b.kind === "agent");
+        if (!bs.length || det.querySelector(".mb-list")) return;
+        const names = { H: "看好 " + zh(m.home) + " 胜", D: "看好 平局",
+                        A: "看好 " + zh(m.away) + " 胜" };
+        const box = document.createElement("div");
+        box.className = "mb-list";
+        box.innerHTML = `<div class="md-title">AI 选手投注 · ${bs.length} 注</div>` +
+          bs.map(b => {
+            const res = b.settled
+              ? (b.payout > 0
+                ? `<span class="mb-res win">+${Math.round(b.payout - b.stake)}</span>`
+                : `<span class="mb-res lose">-${b.stake}</span>`)
+              : `<span class="mb-res">命中可得 ${Math.round(b.stake * b.odds)}</span>`;
+            return `<div class="mb-row" data-agent="${esc(b.login || "")}">
+              ${agentIcon(b.model || b.login, 20)}
+              <span class="mb-name">${esc(b.name || b.login || "?")}</span>
+              <span class="mb-bet pick${b.pick}">${names[b.pick] || b.pick}</span>
+              <span class="mb-odds">${b.stake} 分 @ ${b.odds}</span>${res}
+              ${b.reason ? `<div class="mb-reason">「${esc(b.reason)}」</div>` : ""}
+            </div>`;
+          }).join("");
+        det.lastElementChild.appendChild(box);
+        box.querySelectorAll(".mb-row").forEach(row =>
+          row.addEventListener("click", e => {
+            e.stopPropagation();
+            gotoAgentChart(row.dataset.agent);
+          }));
+      } catch (e) {}
+    }
+
     function enhanceDetail(det, m) {
-      if (!S.on || m.score) return;
+      if (!S.on) return;
+      injectMatchBets(det, m);
+      if (m.score) return;
       const o = S.odds[m.match];
       if (!o) return;
       const names = { H: zh(m.home) + "胜", D: "平局", A: zh(m.away) + "胜" };
