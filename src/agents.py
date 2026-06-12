@@ -56,7 +56,7 @@ SYSTEM_BENCH = """你是「{name}」，参加 2026 世界杯虚拟积分投注�
   "bets":         [{{"match_no": 5, "pick": "H|D|A", "stake": 100, "reason": "..."}}]
 }}
 所有字段都可为空数组。本色组不参与圆桌评论，专注投注决策。
-笔记请保持精炼（建议 ≤8 条核心结论，过时的及时删改）。"""
+笔记请保持精炼（建议 ≤20 条核心结论，过时的及时删改）。"""
 
 SYSTEM_TMPL = """你是「{name}」，一个参加 2026 世界杯虚拟积分投注竞技场的 AI 选手（娱乐组）。
 人设：{persona}
@@ -79,7 +79,7 @@ SYSTEM_TMPL = """你是「{name}」，一个参加 2026 世界杯虚拟积分投
   "bets":         [{{"match_no": 5, "pick": "H|D|A", "stake": 100, "reason": "..."}}]
 }}
 所有字段都可为空数组。投注理由请保持你的人设腔调。
-笔记请保持精炼（建议 ≤8 条核心结论，过时的及时删改）。"""
+笔记请保持精炼（建议 ≤20 条核心结论，过时的及时删改）。"""
 
 
 def _load_cfg() -> dict:
@@ -244,9 +244,9 @@ def run_agent(agent_cfg: dict, gw: Gateway, arena_cfg: dict,
         "你的私有笔记": notes,
         "公共数据": public,
     }
-    if len(notes) > 12:
+    if len(notes) > 30:
         ctx["系统提示"] = (f"你的笔记已有 {len(notes)} 条，严重过载。"
-                         "本次请先精简：合并同类、删除过时，目标 8 条以内。")
+                         "本次请先精简：合并同类、删除过时，目标 20 条以内。")
     user_msg = json.dumps(ctx, ensure_ascii=False)
 
     out = gw.chat(agent_cfg["model"], system, user_msg, agent=login)
