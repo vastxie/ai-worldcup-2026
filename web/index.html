@@ -370,6 +370,20 @@
     color: var(--dim); text-decoration: none; font-family: var(--mono); font-size: 12px; }
   .gh-link:hover { color: var(--lime); }
   .gh-link svg { width: 15px; height: 15px; fill: currentColor; }
+  .foot-right { display: flex; align-items: center; gap: 18px; position: relative; }
+  .qr-join { display: inline-flex; align-items: center; gap: 7px; flex: none;
+    color: var(--dim); background: none; border: none; cursor: pointer;
+    font-family: var(--mono); font-size: 12px; padding: 0; }
+  .qr-join:hover { color: var(--lime); }
+  .qr-join svg { width: 15px; height: 15px; stroke: currentColor; fill: none; }
+  .qr-pop { position: absolute; bottom: calc(100% + 12px); right: 0; z-index: 60;
+    background: #0c1811; border: 1px solid var(--line-strong); border-radius: 6px;
+    padding: 14px 14px 10px; text-align: center;
+    box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+  .qr-pop img { width: 160px; height: 160px; display: block; border-radius: 4px;
+    background: #fff; }
+  .qr-pop p { margin: 9px 0 0; font-family: var(--mono); font-size: 11px;
+    color: var(--dim); }
 
   @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
 
@@ -426,7 +440,6 @@
     padding: 2px; font-size: 10px; position: relative; }
   .card-bets .cb-svg svg { width: 100%; height: 100%; }
   .card-bets .cb-svg img { width: 100%; height: 100%; border-radius: 50%; }
-  .card-bets .cb-svg[data-agent] { cursor: pointer; }
   .card-bets .cb-card { display: none; position: absolute; bottom: calc(100% + 8px);
     left: 50%; transform: translateX(-50%); width: max-content; max-width: 250px;
     text-align: left; background: #0c1811; border: 1px solid var(--line-strong);
@@ -437,23 +450,6 @@
     left: 0; right: 0; height: 12px; }
   .card-bets .cb-svg:hover .cb-card { display: block; }
   .cb-card .cbc-go:hover { text-decoration: underline; }
-
-  /* 详情面板：AI 投注全列表 */
-  .mb-list { margin-top: 18px; }
-  .mb-row { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 9px;
-    padding: 9px 10px; border-bottom: 1px solid var(--line); cursor: pointer; }
-  .mb-row:hover { background: rgba(214,255,222,.03); }
-  .mb-row .ag-icon { width: 20px; height: 20px; padding: 3px; }
-  .mb-name { font-weight: 600; font-size: 13px; color: var(--ink); }
-  .mb-bet, .mb-odds, .mb-res { font-family: var(--mono); font-size: 11.5px; }
-  .mb-bet.pickH { color: var(--lime); }
-  .mb-bet.pickD { color: var(--draw); }
-  .mb-bet.pickA { color: var(--hot); }
-  .mb-odds { color: var(--dim); }
-  .mb-res { color: var(--faint); margin-left: auto; }
-  .mb-res.win { color: var(--lime); }
-  .mb-res.lose { color: var(--hot); }
-  .mb-reason { flex-basis: 100%; font-size: 12px; color: var(--faint); line-height: 1.7; }
   .cb-card .cbc-name { display: block; font-size: 12.5px; font-weight: 700;
     color: var(--ink); margin-bottom: 4px; }
   .cb-card .cbc-bet { display: block; font-family: var(--mono); font-size: 11px;
@@ -680,10 +676,20 @@
 
   <footer>
     <div id="gen-time"></div>
+    <div class="foot-right">
+    <button class="qr-join" id="qr-join" aria-label="显示讨论群二维码">
+      <svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3h-3z"/><path d="M21 14v2M14 21h2M19 19h2v2h-2z"/></svg>
+      加入讨论
+    </button>
+    <div class="qr-pop" id="qr-pop" hidden>
+      <img src="contact-qr.svg" alt="讨论群二维码">
+      <p>扫码加入 AI · 世界杯讨论</p>
+    </div>
     <a class="gh-link" href="https://github.com/vastxie/ai-worldcup-2026" target="_blank" rel="noopener">
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
       开源代码 · GitHub
     </a>
+    </div>
   </footer>
 </div>
 <button class="share-btn" id="share-btn" title="保存长图，方便分享" aria-label="保存长图分享">
@@ -745,6 +751,18 @@
     fillBars();
   }
   navEl.addEventListener("click", e => { if (e.target.dataset.tab) show(e.target.dataset.tab); });
+
+  /* ===== 页脚：扫码加入讨论（点击展开，点外部/Esc 收起） ===== */
+  (function qrJoin() {
+    const btn = document.getElementById("qr-join");
+    const pop = document.getElementById("qr-pop");
+    if (!btn || !pop) return;
+    btn.addEventListener("click", e => { e.stopPropagation(); pop.hidden = !pop.hidden; });
+    document.addEventListener("click", e => {
+      if (!pop.hidden && !pop.contains(e.target)) pop.hidden = true;
+    });
+    document.addEventListener("keydown", e => { if (e.key === "Escape") pop.hidden = true; });
+  })();
   function fillBars() {
     requestAnimationFrame(() => requestAnimationFrame(() => {
       document.querySelectorAll("[data-w]").forEach(b => b.style.width = b.dataset.w + "%");
@@ -1438,51 +1456,20 @@
         const cell = k =>
           `<span class="card-bets cb-${k}">${grp[k].map(b => avatarHtml(b, pickNames)).join("")}</span>`;
         teams.insertAdjacentHTML("beforeend", cell("H") + cell("D") + cell("A"));
-        teams.querySelectorAll(".cb-svg[data-agent]").forEach(el =>
-          el.addEventListener("click", e => {
+        // 头像本身点击不跳转（也不误开详情）；只有悬停卡上的文字可点
+        teams.querySelectorAll(".cb-svg[data-agent]").forEach(el => {
+          el.addEventListener("click", e => e.stopPropagation());
+          const cardEl = el.querySelector(".cb-card");
+          if (cardEl) cardEl.addEventListener("click", e => {
             e.stopPropagation();
             gotoAgentChart(el.dataset.agent);
-          }));
+          });
+        });
       });
     }
 
-    // 详情面板里平铺该场全部 AI 投注（多行、含理由与结算结果），点行跳积分曲线
-    async function injectMatchBets(det, m) {
-      try {
-        const bs = (await api(`/api/bets/match/${m.match}`)).filter(b => b.kind === "agent");
-        if (!bs.length || det.querySelector(".mb-list")) return;
-        const names = { H: "看好 " + zh(m.home) + " 胜", D: "看好 平局",
-                        A: "看好 " + zh(m.away) + " 胜" };
-        const box = document.createElement("div");
-        box.className = "mb-list";
-        box.innerHTML = `<div class="md-title">AI 选手投注 · ${bs.length} 注</div>` +
-          bs.map(b => {
-            const res = b.settled
-              ? (b.payout > 0
-                ? `<span class="mb-res win">+${Math.round(b.payout - b.stake)}</span>`
-                : `<span class="mb-res lose">-${b.stake}</span>`)
-              : `<span class="mb-res">命中可得 ${Math.round(b.stake * b.odds)}</span>`;
-            return `<div class="mb-row" data-agent="${esc(b.login || "")}">
-              ${agentIcon(b.model || b.login, 20)}
-              <span class="mb-name">${esc(b.name || b.login || "?")}</span>
-              <span class="mb-bet pick${b.pick}">${names[b.pick] || b.pick}</span>
-              <span class="mb-odds">${b.stake} 分 @ ${b.odds}</span>${res}
-              ${b.reason ? `<div class="mb-reason">「${esc(b.reason)}」</div>` : ""}
-            </div>`;
-          }).join("");
-        det.lastElementChild.appendChild(box);
-        box.querySelectorAll(".mb-row").forEach(row =>
-          row.addEventListener("click", e => {
-            e.stopPropagation();
-            gotoAgentChart(row.dataset.agent);
-          }));
-      } catch (e) {}
-    }
-
     function enhanceDetail(det, m) {
-      if (!S.on) return;
-      injectMatchBets(det, m);
-      if (m.score) return;
+      if (!S.on || m.score) return;
       const o = S.odds[m.match];
       if (!o) return;
       const names = { H: zh(m.home) + "胜", D: "平局", A: zh(m.away) + "胜" };
