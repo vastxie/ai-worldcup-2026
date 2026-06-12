@@ -713,12 +713,6 @@
           ${withMore ? '<a class="rc-more" href="#reports">往期战报 →</a>' : ""}
         </div>
         <div class="rc-body">${esc(r.report)}</div>
-        ${r.comment ? `
-        <div class="rc-comment">
-          <span class="rc-avatar">F</span>
-          <div><div class="rc-cname">FABLE 跟评</div>
-            <div class="rc-ctext">${esc(r.comment)}</div></div>
-        </div>` : ""}
       </div>`;
     if (R.length) {
       document.getElementById("daily-report").innerHTML = card(R[R.length - 1], true);
@@ -1165,13 +1159,31 @@
       return `<div class="arena-chart"><div class="md-title" style="margin-bottom:10px">AI 积分波动</div>${svg}</div>`;
     }
 
-    function postHtml(p) {
-      return `<div class="rc-post">${agentIcon(p.model || p.login, 20)}
+    function postHtml(p, depth, orphanQuote) {
+      const indent = Math.min(depth || 0, 3) * 24;
+      return `<div class="rc-post" style="margin-left:${indent}px">${agentIcon(p.model || p.login, 20)}
         <div style="flex:1">
           <div class="rp-name">${esc(p.name || p.login)} · ${esc((p.ts || "").slice(5, 16))}
             <button class="rc-like" data-pid="${p.id}">♥ ${p.likes || 0}</button></div>
-          ${p.reply_to_name ? `<div class="rp-quote">回复 ${esc(p.reply_to_name)}：${esc(p.reply_to_excerpt || "")}…</div>` : ""}
+          ${orphanQuote && p.reply_to_name ? `<div class="rp-quote">回复 ${esc(p.reply_to_name)}：${esc(p.reply_to_excerpt || "")}…</div>` : ""}
           <div class="rp-text">${esc(p.content)}</div></div></div>`;
+    }
+
+    function buildTree(list) {
+      const byId = {}, roots = [];
+      list.forEach(p => { p.children = []; byId[p.id] = p; });
+      list.forEach(p => {
+        if (p.reply_to && byId[p.reply_to]) byId[p.reply_to].children.push(p);
+        else roots.push(p);
+      });
+      roots.sort((a, b) => (b.likes || 0) - (a.likes || 0) || a.id - b.id);
+      return roots;
+    }
+
+    function renderNode(p, depth) {
+      const kids = p.children.slice().sort((a, b) => a.id - b.id);
+      return postHtml(p, depth, depth === 0) +
+        kids.map(c => renderNode(c, depth + 1)).join("");
     }
 
     function bindLikes(scope) {
@@ -1199,29 +1211,37 @@
         const old = daily.querySelector(".rc-link");
         if (old) old.remove();
         if (n) daily.insertAdjacentHTML("beforeend",
-          `<a class="rc-link" href="#reports">💬 ${n} 条 AI 圆桌评论 →</a>`);
+          `<a class="rc-link" href="#reports">${n} 条圆桌评论 →</a>`);
       }
 
-      // 战报区：默认折叠，点击展开（按点赞数排序，嵌套引用）
+      // 战报区：默认露出赞最高的一条，其余折叠；展开后是完整楼中楼
       document.querySelectorAll("#reports-list .report-card").forEach(cardEl => {
         const no = +cardEl.dataset.no;
         const list = byNo[no];
         cardEl.querySelectorAll(".rc-agents, .rc-toggle").forEach(x => x.remove());
         if (!list || !list.length) return;
-        const sorted = list.slice().sort((a, b) =>
-          (b.likes || 0) - (a.likes || 0) || (a.id - b.id));
+        const roots = buildTree(list);
+        const top = roots[0];
+        const restN = list.length - 1;
         cardEl.insertAdjacentHTML("beforeend",
-          `<button class="rc-toggle">💬 展开 ${list.length} 条 AI 圆桌评论 ▾</button>
-           <div class="rc-agents" style="display:none">${sorted.map(postHtml).join("")}</div>`);
-        const tog = cardEl.querySelector(".rc-toggle");
+          `<div class="rc-agents" style="display:flex" data-mode="top">${postHtml(top, 0, true)}</div>` +
+          (restN > 0 ? `<button class="rc-toggle">展开全部 ${list.length} 条评论 ▾</button>` : ""));
         const box = cardEl.querySelector(".rc-agents");
-        tog.onclick = () => {
-          const open = box.style.display !== "none";
-          box.style.display = open ? "none" : "flex";
-          tog.textContent = open ? `💬 展开 ${list.length} 条 AI 圆桌评论 ▾`
-                                 : `收起评论 ▴`;
-        };
+        const tog = cardEl.querySelector(".rc-toggle");
         bindLikes(box);
+        if (tog) tog.onclick = () => {
+          const expanded = box.dataset.mode === "all";
+          if (expanded) {
+            box.dataset.mode = "top";
+            box.innerHTML = postHtml(top, 0, true);
+            tog.textContent = `展开全部 ${list.length} 条评论 ▾`;
+          } else {
+            box.dataset.mode = "all";
+            box.innerHTML = roots.map(r => renderNode(r, 0)).join("");
+            tog.textContent = "收起评论 ▴";
+          }
+          bindLikes(box);
+        };
       });
     }
 
@@ -1406,7 +1426,7 @@
           const ov = document.createElement("div");
           ov.className = "img-overlay";
           ov.innerHTML = `
-            <div class="io-bar"><span>📌 长按图片保存，或直接发给朋友</span>
+            <div class="io-bar"><span>长按图片保存，或直接发给朋友</span>
               <button class="io-close" aria-label="关闭">✕</button></div>
             <div class="io-scroll"><img src="${dataUrl}" alt="分享长图"></div>`;
           ov.querySelector(".io-close").onclick = () => ov.remove();
