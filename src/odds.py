@@ -126,14 +126,17 @@ def sync(quiet: bool = False) -> dict | None:
         return cache or None
     now = time.time()
     try:
+        from . import db
         if now - cache.get("h2h_ts", 0) > H2H_MAX_AGE:
             cache["h2h"] = _fetch_h2h(key)
             cache["h2h_ts"] = now
+            db.snapshot_odds("h2h", cache["h2h"])
             if not quiet:
                 print(f"  [odds] 已更新 {len(cache['h2h'])} 场盘口")
         if now - cache.get("winner_ts", 0) > WINNER_MAX_AGE:
             cache["winner"] = _fetch_winner(key)
             cache["winner_ts"] = now
+            db.snapshot_odds("winner", cache["winner"])
             if not quiet:
                 print(f"  [odds] 已更新夺冠赔率（{len(cache['winner'])} 队）")
         CACHE.write_text(json.dumps(cache, ensure_ascii=False, indent=1),

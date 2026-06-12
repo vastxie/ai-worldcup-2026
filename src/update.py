@@ -24,7 +24,7 @@ import time
 from collections import Counter
 from pathlib import Path
 
-from . import fetch, odds, report
+from . import db, fetch, odds, report
 from .model import match_probabilities, score_grid
 from .state import build_state
 from .tournament import GROUPS, simulate_tournament
@@ -194,20 +194,10 @@ def build_schedule(state: dict) -> list[dict]:
 # ------------------------------------------------------------------ history --
 
 def update_history(sim_out: dict, played: int, sims: int) -> list[dict]:
-    path = ROOT / "data" / "history.json"
-    history = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
     today = time.strftime("%Y-%m-%d")
-    snapshot = {
-        "date": today,
-        "played": played,
-        "sims": sims,
-        "champion": {t["code"]: t["p_champion"] for t in sim_out["teams"][:12]},
-    }
-    history = [h for h in history if h["date"] != today] + [snapshot]
-    history.sort(key=lambda h: h["date"])
-    path.write_text(json.dumps(history, ensure_ascii=False, indent=1),
-                    encoding="utf-8")
-    return history
+    champion = {t["code"]: t["p_champion"] for t in sim_out["teams"][:12]}
+    db.save_champ_snapshot(today, played, sims, champion)
+    return db.load_champ_history()
 
 
 # ------------------------------------------------------------------ outputs --
@@ -268,6 +258,16 @@ def print_report(payload: dict) -> None:
 
 def run(sims: int, seed: int | None, do_fetch: bool,
         workers: int | None = None) -> dict:
+    db.init_db()
+    # 自举：库为空（如服务器首次切换）时自动从 JSON 迁移，保护 cron 不踩空
+    conn = db.connect()
+    empty = conn.execute("SELECT COUNT(*) FROM matches").fetchone()[0] == 0
+    conn.close()
+    if empty:
+        from . import migrate
+        print("  [db] 数据库为空，自动从 JSON 迁移…")
+        migrate.main()
+
     if do_fetch:
         fetch.sync()
         odds.sync()

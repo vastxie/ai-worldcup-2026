@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS elo_history (
   ts        TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_elo_team ON elo_history(team);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_elo_match_team ON elo_history(match_no, team);
 
 CREATE TABLE IF NOT EXISTS reports (
   no      INTEGER PRIMARY KEY,
@@ -329,10 +330,10 @@ def save_champ_snapshot(date: str, played: int, sims: int, champion: dict) -> No
 
 
 def log_elo_change(match_no: int, changes: list[tuple]) -> None:
-    """changes: [(team, before, after), ...]"""
+    """changes: [(team, before, after), ...]。幂等：同场同队只记一次。"""
     with transaction() as conn:
         for team, before, after in changes:
-            conn.execute("""INSERT INTO elo_history
+            conn.execute("""INSERT OR IGNORE INTO elo_history
                             (match_no, team, elo_before, elo_after, ts)
                             VALUES (?,?,?,?,?)""",
                          (match_no, team, round(before, 2), round(after, 2),

@@ -20,9 +20,9 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from . import db
+
 ROOT = Path(__file__).resolve().parent.parent
-REPORTS = ROOT / "data" / "reports.json"
-BLURBS = ROOT / "data" / "blurbs.json"
 
 WRITER_SYSTEM = (
     "你是世界杯预测网站的 AI 编辑。根据给定的数据摘要写一段 180~280 字的中文每日战报。"
@@ -129,17 +129,13 @@ def _build_digest(payload: dict) -> dict:
 
 # ------------------------------------------------------------------ 每日战报 --
 
-def _load(path: Path, default):
-    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else default
-
-
 def _publish() -> None:
     """把存档同步到网站（无论本次是否新生成）。"""
-    reports = _load(REPORTS, [])
+    reports = db.load_reports()
     (ROOT / "web" / "reports.js").write_text(
         "window.WC_REPORTS = " + json.dumps(reports[-60:], ensure_ascii=False)
         + ";\n", encoding="utf-8")
-    blurbs = _load(BLURBS, {})
+    blurbs = db.load_blurbs()
     (ROOT / "web" / "blurbs.js").write_text(
         "window.WC_BLURBS = " + json.dumps(
             {k: v["text"] for k, v in blurbs.items()}, ensure_ascii=False)
@@ -147,7 +143,7 @@ def _publish() -> None:
 
 
 def maybe_generate_report(payload: dict) -> None:
-    reports = _load(REPORTS, [])
+    reports = db.load_reports()
     today = time.strftime("%Y-%m-%d")
     played = payload["meta"]["played"]
     last = reports[-1] if reports else None
@@ -162,14 +158,12 @@ def maybe_generate_report(payload: dict) -> None:
         comment = _chat(cfg, COMMENTER_SYSTEM,
                         f"数据摘要：{digest}\n\n主笔战报：{body}",
                         model=cfg.get("commenter_model"))
-        reports.append({
+        db.save_report({
             "date": today, "time": time.strftime("%H:%M"),
             "played": played, "no": len(reports) + 1,
             "report": body, "comment": comment,
         })
-        REPORTS.write_text(json.dumps(reports, ensure_ascii=False, indent=1),
-                           encoding="utf-8")
-        print(f"  [report] 已生成第 {len(reports)} 期战报")
+        print(f"  [report] 已生成第 {len(reports) + 1} 期战报")
     except Exception as exc:  # noqa: BLE001
         print(f"  [report] 战报生成失败（{exc}），跳过")
 
@@ -180,7 +174,7 @@ def maybe_generate_blurbs(payload: dict) -> None:
     cfg = _llm_config()
     if not cfg:
         return
-    blurbs = _load(BLURBS, {})
+    blurbs = db.load_blurbs()
     name = {t["code"]: t["name_zh"] for t in payload["teams"]}
     by_code = {t["code"]: t for t in payload["teams"]}
     now = datetime.now(timezone.utc)
@@ -209,12 +203,9 @@ def maybe_generate_blurbs(payload: dict) -> None:
         raw = _chat(cfg, BLURB_SYSTEM, json.dumps(todo, ensure_ascii=False))
         raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```")
         out = json.loads(raw)
-        ts = time.strftime("%Y-%m-%d %H:%M")
         for k, text in out.items():
             if k in todo and isinstance(text, str) and text.strip():
-                blurbs[k] = {"text": text.strip(), "ts": ts}
-        BLURBS.write_text(json.dumps(blurbs, ensure_ascii=False, indent=1),
-                          encoding="utf-8")
+                db.save_blurb(int(k), text.strip())
         print(f"  [report] 已生成 {len(out)} 条单场看点")
     except Exception as exc:  # noqa: BLE001
         print(f"  [report] 看点生成失败（{exc}），跳过")

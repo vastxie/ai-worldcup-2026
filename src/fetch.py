@@ -74,15 +74,15 @@ def _to_match(row: dict) -> dict:
 
 
 def sync(quiet: bool = False) -> bool:
-    """拉取 feed 并重写 data/matches.json。失败返回 False（保留旧数据）。"""
-    path = ROOT / "data" / "matches.json"
+    """拉取 feed 并写入数据库（手动录入的比分不会被覆盖）。"""
+    from . import db
     try:
         req = urllib.request.Request(FEED_URL, headers={"User-Agent": UA})
         with urllib.request.urlopen(req, timeout=25) as resp:
             feed = json.loads(resp.read().decode("utf-8"))
     except Exception as exc:  # noqa: BLE001 - 网络问题一律降级
         if not quiet:
-            print(f"  [fetch] 同步失败（{exc}），沿用本地 matches.json")
+            print(f"  [fetch] 同步失败（{exc}），沿用数据库现有赛程")
         return False
 
     matches = sorted((_to_match(r) for r in feed), key=lambda m: m["match"])
@@ -90,8 +90,7 @@ def sync(quiet: bool = False) -> bool:
         if not quiet:
             print(f"  [fetch] feed 异常：{len(matches)} 场 ≠ 104，忽略本次同步")
         return False
-    path.write_text(json.dumps(matches, ensure_ascii=False, indent=1),
-                    encoding="utf-8")
+    db.upsert_matches(matches, source="feed")
     played = sum(1 for m in matches if m["score"])
     if not quiet:
         print(f"  [fetch] 已同步 104 场赛程，其中 {played} 场有比分")
@@ -99,22 +98,9 @@ def sync(quiet: bool = False) -> bool:
 
 
 def load_matches() -> list[dict]:
-    """读取 matches.json 并合入手动录入的比分（manual_results.json 优先）。"""
-    path = ROOT / "data" / "matches.json"
-    matches = json.loads(path.read_text(encoding="utf-8"))
-    manual_path = ROOT / "data" / "manual_results.json"
-    if manual_path.exists():
-        manual = json.loads(manual_path.read_text(encoding="utf-8"))
-        for m in matches:
-            override = manual.get(str(m["match"]))
-            if override:
-                m["score"] = override.get("score", m["score"])
-                m["winner"] = override.get("winner", m["winner"])
-                if override.get("home"):
-                    m["home"] = override["home"]
-                if override.get("away"):
-                    m["away"] = override["away"]
-    return matches
+    """从数据库读取赛程（手动录入已在库内合并）。"""
+    from . import db
+    return db.load_matches()
 
 
 if __name__ == "__main__":

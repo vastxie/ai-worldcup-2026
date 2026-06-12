@@ -11,7 +11,7 @@ import json
 import time
 from pathlib import Path
 
-from . import odds
+from . import db, odds
 from .elo import update_elo
 from .fetch import load_matches
 from .model import (effective_elo, exact_score_prob, match_probabilities,
@@ -19,7 +19,6 @@ from .model import (effective_elo, exact_score_prob, match_probabilities,
 from .tournament import GROUPS
 
 ROOT = Path(__file__).resolve().parent.parent
-LOCKED_PATH = ROOT / "data" / "locked_preds.json"
 MODEL_WEIGHT = 0.7   # 融合权重：模型 0.7 + 市场 0.3
 
 
@@ -43,12 +42,6 @@ def outcome_of(score) -> str:
     return "H" if gh > ga else ("A" if ga > gh else "D")
 
 
-def _load_locked() -> dict:
-    if LOCKED_PATH.exists():
-        return json.loads(LOCKED_PATH.read_text(encoding="utf-8"))
-    return {}
-
-
 def build_state() -> dict:
     """回放全部已赛比赛，返回当前完整状态。"""
     by_code = load_teams()
@@ -60,7 +53,7 @@ def build_state() -> dict:
     played.sort(key=lambda m: (m["date_utc"], m["match"]))
 
     # 赛前锁定的「模型+市场」融合预测（开赛前最后一次更新写入，赛后冻结）
-    locked = _load_locked()
+    locked = db.load_locks()
 
     records = []           # 已赛比赛的事前预测 vs 实际
     n_outcome_hit = n_score_hit = 0
@@ -105,9 +98,13 @@ def build_state() -> dict:
             "score_hit": score_hit,
         })
 
+        elo_h_before, elo_a_before = home["elo"], away["elo"]
         home["elo"], away["elo"] = update_elo(
             home["elo"], away["elo"], tuple(m["score"]),
             home.get("host", False), away.get("host", False))
+        db.log_elo_change(m["match"], [
+            (m["home"], elo_h_before, home["elo"]),
+            (m["away"], elo_a_before, away["elo"])])
 
         # 开放度随实际总进球微调（场面比预期开放 → 双方 open 上浮）
         lam_h, lam_a_ = pred["lambdas"]
@@ -122,7 +119,6 @@ def build_state() -> dict:
     odds_cache = odds.load() or {}
     h2h = odds_cache.get("h2h", {})
     we_overrides = {}
-    locked_dirty = False
     for m in matches:
         if not (m["home"] and m["away"]) or m["score"]:
             continue  # 对阵未定或已赛（已赛的锁档不再改动）
@@ -145,13 +141,10 @@ def build_state() -> dict:
                 "we": we_blend, "market": mkt,
                 "ts": time.strftime("%Y-%m-%d %H:%M"),
             }
-            locked_dirty = True
+            db.save_lock(m["match"], we_blend, mkt)
         lk = locked.get(str(m["match"]))
         if lk:
             we_overrides[(m["home"], m["away"])] = lk["we"]
-    if locked_dirty:
-        LOCKED_PATH.write_text(json.dumps(locked, ensure_ascii=False, indent=1),
-                               encoding="utf-8")
 
     # ---- 条件模拟所需的固定结果 ----
     group_results = {(m["home"], m["away"]): tuple(m["score"])

@@ -15,7 +15,7 @@ fi
 
 EXCLUDES=(--exclude '__pycache__' --exclude '.DS_Store' --exclude 'out/'
           --exclude 'share/' --exclude '.claude/' --exclude '.git/'
-          --exclude '.deploy.env')
+          --exclude '.deploy.env' --exclude 'data/worldcup.db*' --exclude 'backups/')
 if [[ "$1" != "--init" ]]; then
   EXCLUDES+=(--exclude 'web/data.js' --exclude 'data/history.json'
              --exclude 'data/matches.json' --exclude 'data/manual_results.json'

@@ -1,9 +1,15 @@
 {
-  "odds_api_key": "在 the-odds-api.com 免费注册获取（可选；不配置则纯模型运行，不融合盘口）",
-  "llm": {
-    "base_url": "https://你的OpenAI兼容接口/v1（可选；不配置则战报由人工撰写）",
-    "api_key": "...",
-    "model": "...",
-    "commenter_model": "（可选，跟评模型，默认同 model）"
-  }
+ "odds_api_key": "在 the-odds-api.com 免费注册获取（可选；不配置则纯模型运行，不融合盘口）",
+ "llm": {
+  "base_url": "https://你的OpenAI兼容接口/v1（可选；不配置则战报由人工撰写）",
+  "api_key": "...",
+  "model": "...",
+  "commenter_model": "（可选，跟评模型，默认同 model）"
+ },
+ "github_oauth": {
+  "client_id": "GitHub OAuth App 的 Client ID（可选，投注登录用）",
+  "client_secret": "...",
+  "callback_url": "https://你的域名/api/auth/callback"
+ },
+ "session_secret": "随机 64 位 hex（会话签名密钥）"
 }
