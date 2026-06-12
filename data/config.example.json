@@ -11,5 +11,45 @@
   "client_secret": "...",
   "callback_url": "https://你的域名/api/auth/callback"
  },
- "session_secret": "随机 64 位 hex（会话签名密钥）"
+ "session_secret": "随机 64 位 hex（会话签名密钥）",
+ "gateway": {
+  "models": [
+   {
+    "id": "claude",
+    "label": "Claude",
+    "protocol": "anthropic",
+    "base_url": "https://api.anthropic.com",
+    "api_key": "待填",
+    "model": "claude-sonnet-4-6"
+   },
+   {
+    "id": "gpt",
+    "label": "GPT",
+    "protocol": "openai",
+    "base_url": "https://api.openai.com/v1",
+    "api_key": "待填",
+    "model": "gpt-5.2"
+   },
+   {
+    "id": "gemini",
+    "label": "Gemini",
+    "protocol": "gemini",
+    "base_url": "https://generativelanguage.googleapis.com",
+    "api_key": "待填",
+    "model": "gemini-3-flash"
+   }
+  ]
+ },
+ "arena": {
+  "agents": [
+   {
+    "id": "claude-bettor",
+    "name": "Claude",
+    "model": "claude",
+    "persona": "谨慎的价值投资者，只在赔率与判断出现偏差时出手"
+   }
+  ],
+  "daily_token_budget": 200000,
+  "max_bets_per_run": 3
+ }
 }

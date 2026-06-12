@@ -157,6 +157,10 @@ def init_db(conn: sqlite3.Connection | None = None) -> None:
     own = conn is None
     conn = conn or connect()
     conn.executescript(SCHEMA)
+    try:  # 增量迁移：投注理由（AI 下注的"嘴硬记录"）
+        conn.execute("ALTER TABLE bets ADD COLUMN reason TEXT")
+    except sqlite3.OperationalError:
+        pass
     conn.commit()
     if own:
         conn.close()
@@ -380,7 +384,7 @@ def get_user(user_id: int) -> dict | None:
 
 
 def place_bet(user_id: int, match_no: int, pick: str, stake: int,
-              odds: float) -> dict:
+              odds: float, reason: str | None = None) -> dict:
     """事务下注：校验余额、扣款、记账。调用方负责开球时间与赔率校验。"""
     with transaction() as conn:
         user = conn.execute("SELECT * FROM users WHERE id=?",
@@ -390,9 +394,9 @@ def place_bet(user_id: int, match_no: int, pick: str, stake: int,
         if user["balance"] < stake:
             raise ValueError("余额不足")
         cur = conn.execute("""INSERT INTO bets
-            (user_id, match_no, pick, stake, odds, placed_at)
-            VALUES (?,?,?,?,?,?)""",
-            (user_id, match_no, pick, stake, odds, now()))
+            (user_id, match_no, pick, stake, odds, placed_at, reason)
+            VALUES (?,?,?,?,?,?,?)""",
+            (user_id, match_no, pick, stake, odds, now(), reason))
         bet_id = cur.lastrowid
         conn.execute("UPDATE users SET balance = balance - ? WHERE id=?",
                      (stake, user_id))
@@ -460,9 +464,84 @@ def match_bets(match_no: int) -> list[dict]:
     conn = connect()
     rows = conn.execute("""
         SELECT b.id, b.pick, b.stake, b.odds, b.settled, b.payout, b.placed_at,
+               b.reason,
                u.id AS user_id, u.kind, u.login, u.name, u.avatar_url, u.model
         FROM bets b JOIN users u ON u.id = b.user_id
         WHERE b.match_no=? ORDER BY b.placed_at""", (match_no,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+# ------------------------------------------------------------- agents 专区 --
+
+def ensure_agent_user(login: str, name: str, model: str,
+                      persona: str) -> dict:
+    """注册/更新 AI 选手（kind=agent），新选手发同额初始积分。"""
+    with transaction() as conn:
+        row = conn.execute(
+            "SELECT * FROM users WHERE kind='agent' AND login=?",
+            (login,)).fetchone()
+        if row:
+            conn.execute("UPDATE users SET name=?, model=?, persona=? "
+                         "WHERE id=?", (name, model, persona, row["id"]))
+            return dict(row)
+        cur = conn.execute("""INSERT INTO users
+            (kind, login, name, model, persona, balance, created_at)
+            VALUES ('agent',?,?,?,?,?,?)""",
+            (login, name, model, persona, INIT_BALANCE, now()))
+        uid = cur.lastrowid
+        conn.execute("INSERT INTO wallet_ledger (user_id, delta, reason, ts) "
+                     "VALUES (?,?,?,?)", (uid, INIT_BALANCE, "init", now()))
+        return dict(conn.execute("SELECT * FROM users WHERE id=?",
+                                 (uid,)).fetchone())
+
+
+def agent_notes_list(agent_id: int) -> list[dict]:
+    conn = connect()
+    rows = conn.execute("SELECT id, title, content, updated_at FROM agent_notes "
+                        "WHERE agent_id=? ORDER BY id", (agent_id,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def agent_note_add(agent_id: int, title: str, content: str) -> int:
+    with transaction() as conn:
+        cur = conn.execute("""INSERT INTO agent_notes
+            (agent_id, title, content, created_at, updated_at)
+            VALUES (?,?,?,?,?)""", (agent_id, title, content, now(), now()))
+        return cur.lastrowid
+
+
+def agent_note_update(agent_id: int, note_id: int, title: str | None,
+                      content: str | None) -> bool:
+    with transaction() as conn:
+        cur = conn.execute("""UPDATE agent_notes SET
+            title=COALESCE(?, title), content=COALESCE(?, content), updated_at=?
+            WHERE id=? AND agent_id=?""",
+            (title, content, now(), note_id, agent_id))
+        return cur.rowcount > 0
+
+
+def agent_note_delete(agent_id: int, note_id: int) -> bool:
+    with transaction() as conn:
+        cur = conn.execute("DELETE FROM agent_notes WHERE id=? AND agent_id=?",
+                           (note_id, agent_id))
+        return cur.rowcount > 0
+
+
+def agent_post_add(agent_id: int, report_no: int | None, content: str) -> None:
+    with transaction() as conn:
+        conn.execute("INSERT INTO agent_posts (agent_id, report_no, content, ts) "
+                     "VALUES (?,?,?,?)", (agent_id, report_no, content, now()))
+
+
+def agent_posts(limit: int = 200) -> list[dict]:
+    conn = connect()
+    rows = conn.execute("""
+        SELECT p.report_no, p.content, p.ts,
+               u.login, u.name, u.model, u.avatar_url
+        FROM agent_posts p JOIN users u ON u.id = p.agent_id
+        ORDER BY p.id DESC LIMIT ?""", (limit,)).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 

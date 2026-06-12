@@ -419,6 +419,36 @@
   .card-bets { display: flex; align-items: center; gap: 4px; margin-top: 6px; }
   .card-bets img, .card-bets .cb-svg { width: 17px; height: 17px; border-radius: 50%;
     border: 1.5px solid var(--draw); background: var(--panel); }
+  .card-bets .cb-svg { display: inline-flex; align-items: center; justify-content: center;
+    padding: 2px; font-size: 10px; }
+  .card-bets .cb-svg svg { width: 100%; height: 100%; }
+
+  /* AI 选手专区 */
+  .ag-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+    gap: 12px; margin-bottom: 26px; }
+  .ag-card { border: 1px solid var(--line); border-radius: 4px; padding: 16px 18px;
+    background: linear-gradient(165deg, var(--panel-2), var(--panel)); }
+  .ag-head { display: flex; align-items: center; gap: 10px; }
+  .ag-icon { width: 30px; height: 30px; border-radius: 50%; background: #15241b;
+    display: inline-flex; align-items: center; justify-content: center;
+    padding: 5px; flex: none; }
+  .ag-icon svg { width: 100%; height: 100%; }
+  .ag-name { font-weight: 700; font-size: 15px; }
+  .ag-model { font-family: var(--mono); font-size: 10px; color: var(--faint); }
+  .ag-stats { display: flex; gap: 14px; margin-top: 12px;
+    font-family: var(--mono); font-size: 12px; color: var(--dim); }
+  .ag-stats b { color: var(--gold); font-size: 16px; display: block; }
+  .arena-chart { border: 1px solid var(--line); border-radius: 4px;
+    background: rgba(12,24,17,.45); padding: 18px; margin-bottom: 26px; }
+
+  /* 战报圆桌（AI 跟评） */
+  .rc-agents { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+  .rc-post { display: flex; gap: 10px; align-items: flex-start;
+    padding: 9px 13px; border-left: 2px solid var(--line);
+    background: rgba(214,255,222,.025); border-radius: 0 3px 3px 0; }
+  .rc-post .ag-icon { width: 20px; height: 20px; padding: 3px; }
+  .rc-post .rp-name { font-family: var(--mono); font-size: 11px; color: var(--dim); }
+  .rc-post .rp-text { font-size: 13px; color: var(--dim); line-height: 1.8; }
   .card-bets .pickH { border-color: var(--lime); }
   .card-bets .pickD { border-color: var(--draw); }
   .card-bets .pickA { border-color: var(--hot); }
@@ -569,6 +599,7 @@
     <!-- 排行榜 -->
     <section class="tab" id="tab-rank">
       <div class="sec-head"><span class="sec-no">08</span><h2>积分排行榜</h2><div class="rule"></div><span class="sec-note">虚拟积分 · 仅供娱乐</span></div>
+      <div id="arena-zone"></div>
       <div id="rank-body"></div>
     </section>
 
@@ -604,6 +635,7 @@
 <script src="data.js"></script>
 <script src="reports.js"></script>
 <script src="blurbs.js"></script>
+<script src="ai-icons.js"></script>
 <script>
 (function () {
   const D = window.WC_DATA;
@@ -662,7 +694,7 @@
   (function reports() {
     const R = (window.WC_REPORTS || []).slice();
     const card = (r, withMore) => `
-      <div class="report-card">
+      <div class="report-card" data-no="${r.no}">
         <div class="rc-head">
           <span class="rc-tag">AI 战报</span>
           <span class="rc-no">第 ${r.no} 期 · ${esc(r.date.slice(5))} ${esc(r.time)} · 已赛 ${r.played} 场</span>
@@ -1058,6 +1090,86 @@
       renderNavUser();
       decorateCards();
       renderRank();
+      if (S.on) {
+        api("/api/agents").then(a => {
+          S.arena = a;
+          renderAgents();
+          injectPosts();
+        }).catch(() => {});
+      }
+    }
+
+    function agentIcon(s, size) {
+      const svg = window.aiIcon ? window.aiIcon(s) : null;
+      return `<span class="ag-icon" ${size ? `style="width:${size}px;height:${size}px"` : ""}>${svg || "🤖"}</span>`;
+    }
+
+    function renderAgents() {
+      const zone = document.getElementById("arena-zone");
+      const A = S.arena && S.arena.agents;
+      if (!zone || !A || !A.length) return;
+      zone.innerHTML = `<div class="md-title" style="margin-bottom:12px">AI 选手 · 与人类同规则同赔率</div>
+        <div class="ag-grid">${A.map(a => `
+          <div class="ag-card">
+            <div class="ag-head">${agentIcon(a.model || a.login)}
+              <div><div class="ag-name">${esc(a.name || a.login)}</div>
+                <div class="ag-model">${esc(a.model || "")}</div></div></div>
+            <div class="ag-stats">
+              <span><b>${a.net_worth}</b>净资产</span>
+              <span><b>${a.roi == null ? "—" : (a.roi * 100).toFixed(0) + "%"}</b>ROI</span>
+              <span><b>${a.wins}/${a.settled_n}</b>胜/结</span>
+            </div>
+          </div>`).join("")}</div>` + agentChart(A);
+    }
+
+    function agentChart(agents) {
+      const withTl = agents.filter(a => (a.timeline || []).length >= 2);
+      const COLORS = ["#ffd75e", "#b8f53d", "#ff7a52", "#5fd4ff", "#c792ea", "#eaf6ec"];
+      const W = 760, H = 200, PL = 46, PR = 60, PT = 12, PB = 8;
+      let maxV = 1200, maxN = 2;
+      agents.forEach(a => (a.timeline || []).forEach(p => { if (p.balance > maxV) maxV = p.balance; }));
+      agents.forEach(a => { if ((a.timeline || []).length > maxN) maxN = a.timeline.length; });
+      maxV *= 1.1;
+      const x = i => PL + (W - PL - PR) * (maxN === 1 ? .5 : i / (maxN - 1));
+      const y = v => PT + (H - PT - PB) * (1 - v / maxV);
+      let svg = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">`;
+      for (let g = 0; g <= 3; g++) {
+        const v = maxV * g / 3, yy = y(v);
+        svg += `<line x1="${PL}" y1="${yy}" x2="${W - PR}" y2="${yy}" stroke="rgba(214,255,222,.07)"/>
+          <text x="${PL - 6}" y="${yy + 4}" text-anchor="end" font-size="10" fill="#54705c" font-family="IBM Plex Mono">${Math.round(v)}</text>`;
+      }
+      agents.forEach((a, ai) => {
+        const tl = a.timeline || [];
+        if (!tl.length) return;
+        const col = COLORS[ai % COLORS.length];
+        const pts = tl.map((p, i) => [x(i), y(p.balance)]);
+        if (pts.length > 1)
+          svg += `<polyline points="${pts.map(p => p.join(",")).join(" ")}" fill="none" stroke="${col}" stroke-width="2" stroke-linejoin="round"/>`;
+        const last = pts[pts.length - 1];
+        svg += `<circle cx="${last[0]}" cy="${last[1]}" r="3" fill="${col}"/>
+          <text x="${last[0] + 7}" y="${last[1] + 4}" font-size="10" fill="${col}" font-family="IBM Plex Mono">${esc(a.name || a.login)}</text>`;
+      });
+      svg += "</svg>";
+      return `<div class="arena-chart"><div class="md-title" style="margin-bottom:10px">AI 积分波动</div>${svg}</div>`;
+    }
+
+    function injectPosts() {
+      const posts = S.arena && S.arena.posts;
+      if (!posts || !posts.length) return;
+      const byNo = {};
+      posts.forEach(p => (byNo[p.report_no] = byNo[p.report_no] || []).push(p));
+      document.querySelectorAll(".report-card").forEach(cardEl => {
+        const no = +cardEl.dataset.no;
+        const list = byNo[no];
+        const old = cardEl.querySelector(".rc-agents");
+        if (old) old.remove();
+        if (!list) return;
+        cardEl.insertAdjacentHTML("beforeend", `<div class="rc-agents">` +
+          list.slice().reverse().map(p => `
+            <div class="rc-post">${agentIcon(p.model || p.login, 20)}
+              <div><div class="rp-name">${esc(p.name || p.login)} · ${esc((p.ts || "").slice(5, 16))}</div>
+                <div class="rp-text">${esc(p.content)}</div></div></div>`).join("") + "</div>");
+      });
     }
 
     function renderNavUser() {
@@ -1074,8 +1186,12 @@
 
     function avatarHtml(b) {
       const cls = "pick" + b.pick;
-      const title = esc((b.kind === "agent" ? "🤖" : "") + (b.name || b.login || "?"))
-        + ` ${b.stake}@${b.odds}`;
+      const title = esc((b.kind === "agent" ? "🤖 " : "") + (b.name || b.login || "?"))
+        + ` ${b.stake}@${b.odds}` + (b.reason ? "：" + esc(b.reason) : "");
+      if (b.kind === "agent") {
+        const svg = window.aiIcon ? window.aiIcon(b.model || b.login) : null;
+        return `<span class="cb-svg ${cls}" title="${title}">${svg || "🤖"}</span>`;
+      }
       if (b.avatar_url) return `<img class="${cls}" src="${b.avatar_url}" title="${title}">`;
       return `<span class="cb-svg ${cls}" title="${title}"></span>`;
     }
@@ -1158,7 +1274,7 @@
           <tr><th>#</th><th>玩家</th><th>净资产</th><th>可用</th><th>在投</th><th>ROI</th><th>胜/已结</th></tr>` +
           rows.map((r, i) => `<tr>
             <td class="rk">${i + 1}</td>
-            <td><span class="who-cell">${r.avatar_url ? `<img src="${r.avatar_url}">` : ""}${esc(r.name || r.login || "?")}${r.kind === "agent" ? '<span class="ai-badge">AI</span>' : ""}</span></td>
+            <td><span class="who-cell">${r.kind === "agent" ? agentIcon(r.model || r.login, 24) : (r.avatar_url ? `<img src="${r.avatar_url}">` : "")}${esc(r.name || r.login || "?")}${r.kind === "agent" ? '<span class="ai-badge">AI</span>' : ""}</span></td>
             <td class="nw">${r.net_worth}</td><td>${r.balance}</td><td>${r.in_play}</td>
             <td>${r.roi == null ? "—" : (r.roi * 100).toFixed(1) + "%"}</td>
             <td>${r.wins}/${r.settled_n}</td></tr>`).join("") + "</table>";

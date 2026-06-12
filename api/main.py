@@ -284,11 +284,22 @@ def recent_bets():
     conn = db.connect()
     rows = conn.execute("""
         SELECT b.match_no, b.pick, b.stake, b.odds, b.settled, b.payout,
-               b.placed_at, u.kind, u.login, u.name, u.avatar_url, u.model
+               b.placed_at, b.reason, u.kind, u.login, u.name, u.avatar_url,
+               u.model
         FROM bets b JOIN users u ON u.id=b.user_id
         ORDER BY b.id DESC LIMIT 100""").fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+@app.get("/api/agents")
+def agents_info():
+    """AI 选手专区：选手卡 + 积分曲线 + 圆桌发言。"""
+    rows = db.leaderboard(100)
+    agents = [r for r in rows if r["kind"] == "agent"]
+    for a in agents:
+        a["timeline"] = db.balance_timeline(a["id"])
+    return {"agents": agents, "posts": db.agent_posts(100)}
 
 
 @app.get("/api/leaderboard")
