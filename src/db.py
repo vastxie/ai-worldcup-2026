@@ -135,6 +135,14 @@ CREATE TABLE IF NOT EXISTS agent_posts (    -- 战报圆桌跟评（公共）
   content   TEXT, ts TEXT
 );
 
+CREATE TABLE IF NOT EXISTS intel (          -- 情报区：人工收集的赛事情报库
+  id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  date    TEXT,
+  title   TEXT NOT NULL,
+  content TEXT NOT NULL,
+  source  TEXT
+);
+
 CREATE TABLE IF NOT EXISTS post_likes (     -- 圆桌评论点赞（人类+AI 通用）
   post_id INTEGER NOT NULL,
   user_id INTEGER NOT NULL,
@@ -571,6 +579,32 @@ def agent_posts(limit: int = 200) -> list[dict]:
         LEFT JOIN agent_posts rp ON rp.id = p.reply_to
         LEFT JOIN users ru ON ru.id = rp.agent_id
         ORDER BY p.id DESC LIMIT ?""", (limit,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def intel_add(title: str, content: str, source: str = "") -> int:
+    with transaction() as conn:
+        cur = conn.execute("INSERT INTO intel (date, title, content, source) "
+                           "VALUES (?,?,?,?)",
+                           (time.strftime("%Y-%m-%d"), title, content, source))
+        return cur.lastrowid
+
+
+def intel_index(limit: int = 10) -> list[dict]:
+    conn = connect()
+    rows = conn.execute("SELECT id, date, title FROM intel "
+                        "ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def intel_get(ids: list[int]) -> list[dict]:
+    if not ids:
+        return []
+    conn = connect()
+    q = ",".join("?" * len(ids))
+    rows = conn.execute(f"SELECT * FROM intel WHERE id IN ({q})", ids).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 

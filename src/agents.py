@@ -45,15 +45,18 @@ SYSTEM_BENCH = """你是「{name}」，参加 2026 世界杯虚拟积分投注�
 - 你有一块私有笔记区（别的选手看不到），跨唤醒持久，是你唯一的长期记忆。
 - 投注理由会公开展示，40 字以内。
 
-你将收到公共数据（赛程/概率/赔率/榜单/最近投注/战报）和你的私有笔记。
+你将收到公共数据（赛程/概率/赔率/赛果/榜单/最近投注/战报/情报区索引）、
+你的结算反馈和私有笔记。
 只输出一个 JSON 对象（不要任何其他文字、不要 markdown 代码块），结构：
 {{
+  "read_intel":   [想读全文的情报id, 最多3个]（可选：申请后系统会把全文发给你再让你做最终决策）,
   "notes_add":    [{{"title": "...", "content": "..."}}],
   "notes_update": [{{"id": 1, "content": "..."}}],
   "notes_delete": [1],
   "bets":         [{{"match_no": 5, "pick": "H|D|A", "stake": 100, "reason": "..."}}]
 }}
-所有字段都可为空数组。本色组不参与圆桌评论，专注投注决策。"""
+所有字段都可为空数组。本色组不参与圆桌评论，专注投注决策。
+笔记请保持精炼（建议 ≤8 条核心结论，过时的及时删改）。"""
 
 SYSTEM_TMPL = """你是「{name}」，一个参加 2026 世界杯虚拟积分投注竞技场的 AI 选手（娱乐组）。
 人设：{persona}
@@ -65,16 +68,18 @@ SYSTEM_TMPL = """你是「{name}」，一个参加 2026 世界杯虚拟积分投
 - 你有一块私有笔记区（别的选手看不到），用来记策略、教训、观察——这是你唯一的跨日记忆，请善用。
 - 投注理由会公开展示在网站上，写得有观点些，但 40 字以内。
 
-现在是投注时间（圆桌讨论另有专场）。你将收到公共数据（赛程/概率/赔率/榜单/
-最近投注/战报/圆桌评论）和你的私有笔记。
+现在是投注时间（圆桌讨论另有专场）。你将收到公共数据（赛程/概率/赔率/赛果/
+榜单/最近投注/最近3期战报/圆桌评论/情报区索引）、你的结算反馈和私有笔记。
 只输出一个 JSON 对象（不要任何其他文字、不要 markdown 代码块），结构：
 {{
+  "read_intel":   [想读全文的情报id, 最多3个]（可选：申请后系统会把全文发给你再让你做最终决策）,
   "notes_add":    [{{"title": "...", "content": "..."}}],
   "notes_update": [{{"id": 1, "content": "..."}}],
   "notes_delete": [1],
   "bets":         [{{"match_no": 5, "pick": "H|D|A", "stake": 100, "reason": "..."}}]
 }}
-所有字段都可为空数组。投注理由请保持你的人设腔调。"""
+所有字段都可为空数组。投注理由请保持你的人设腔调。
+笔记请保持精炼（建议 ≤8 条核心结论，过时的及时删改）。"""
 
 
 def _load_cfg() -> dict:
@@ -116,7 +121,6 @@ def _public_data() -> dict:
             u["看点"] = b["text"]
 
     reports = db.load_reports()
-    latest_report = reports[-1] if reports else None
 
     recent = []
     conn = db.connect()
@@ -126,9 +130,25 @@ def _public_data() -> dict:
     conn.close()
     recent = [dict(r) for r in rows]
 
+    # 最近赛果（结构化：比分 + AI 赛前判断 + 命中情况）——归因分析的原料
+    finished = []
+    for m in payload["schedule"]:
+        if not m.get("score") or not m.get("pred"):
+            continue
+        finished.append({
+            "对阵": f"{name[m['home']]} {m['score'][0]}-{m['score'][1]} {name[m['away']]}",
+            "AI赛前": {"看好": m["pred"].get("pick"),
+                      "首选比分": m["pred"].get("pred_score"),
+                      "主胜率": m["pred"]["p_home"]},
+            "胜负命中": m.get("outcome_hit"), "比分命中": m.get("score_hit"),
+            "时间": m["date_utc"],
+        })
+    finished = sorted(finished, key=lambda x: x["时间"], reverse=True)[:8]
+
     return {
         "今天": time.strftime("%Y-%m-%d %H:%M UTC%z"),
         "未来26小时可投比赛": upcoming,
+        "最近赛果": finished,
         "夺冠概率Top5": [
             {"队": t["name_zh"], "AI": t["p_champion"],
              "市场": t.get("p_champion_market")} for t in payload["teams"][:5]],
@@ -138,12 +158,13 @@ def _public_data() -> dict:
              "净资产": r["net_worth"], "ROI": r["roi"]}
             for r in db.leaderboard(10)],
         "全站最近投注": recent,
-        "最新战报": ({"期数": latest_report["no"],
-                     "正文": latest_report["report"]} if latest_report else None),
+        "最近3期战报": [{"期数": r["no"], "日期": r["date"], "正文": r["report"]}
+                      for r in reports[-3:]],
         "圆桌最近评论": [
             {"id": p["id"], "作者": p["name"], "内容": p["content"],
              "点赞": p["likes"],
              "回复的是": p["reply_to_name"]} for p in db.agent_posts(12)],
+        "情报区索引": db.intel_index(10),
     }
 
 
@@ -193,6 +214,18 @@ def run_agent(agent_cfg: dict, gw: Gateway, arena_cfg: dict,
     notes = db.agent_notes_list(me["id"])
     my_bets = db.user_bets(me["id"])[:15]
 
+    # 结算反馈：把上次唤醒以来的输赢摆到它脸上（reward 信号）
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=36)).strftime("%Y-%m-%d %H:%M")
+    recent_settled = [b for b in my_bets if b["settled"]
+                      and (b["settled_at"] or "") >= cutoff]
+    pnl = sum(b["payout"] - b["stake"] for b in recent_settled)
+    settlement = {
+        "明细": [{"场次": b["match_no"], "方向": b["pick"], "注额": b["stake"],
+                "赔率": b["odds"], "结果": "赢" if b["payout"] else "输",
+                "净盈亏": b["payout"] - b["stake"]} for b in recent_settled],
+        "本期净盈亏": pnl,
+    } if recent_settled else "（无新结算）"
+
     max_bets = arena_cfg.get("max_bets_per_run", 3)
     persona = (agent_cfg.get("persona") or "").strip()
     if persona:
@@ -200,20 +233,44 @@ def run_agent(agent_cfg: dict, gw: Gateway, arena_cfg: dict,
                                     max_bets=max_bets)
     else:  # 本色组：零人设裸跑
         system = SYSTEM_BENCH.format(name=agent_cfg["name"], max_bets=max_bets)
-    user_msg = json.dumps({
+
+    ctx = {
         "你的状态": {"余额": me["balance"],
                    "历史投注": [{"场次": b["match_no"], "方向": b["pick"],
                                "注额": b["stake"], "赔率": b["odds"],
                                "已结": bool(b["settled"]),
                                "派彩": b["payout"]} for b in my_bets]},
+        "结算反馈": settlement,
         "你的私有笔记": notes,
         "公共数据": public,
-    }, ensure_ascii=False)
+    }
+    if len(notes) > 12:
+        ctx["系统提示"] = (f"你的笔记已有 {len(notes)} 条，严重过载。"
+                         "本次请先精简：合并同类、删除过时，目标 8 条以内。")
+    user_msg = json.dumps(ctx, ensure_ascii=False)
 
     out = gw.chat(agent_cfg["model"], system, user_msg, agent=login)
     actions = _parse_json(out["text"])
 
     log = []
+    # 情报两阶段：申请全文 → 喂回 → 最终决策（最多一轮追问）
+    intel_ids = []
+    for i in (actions.get("read_intel") or [])[:3]:
+        try:
+            intel_ids.append(int(i))
+        except (TypeError, ValueError):
+            pass
+    if intel_ids:
+        docs = db.intel_get(intel_ids)
+        if docs:
+            followup = (user_msg + "\n\n【你申请的情报全文】\n"
+                        + json.dumps([{"id": d["id"], "标题": d["title"],
+                                       "正文": d["content"], "来源": d["source"]}
+                                      for d in docs], ensure_ascii=False)
+                        + "\n\n请基于全部信息输出最终决策 JSON（不要再申请情报）。")
+            out = gw.chat(agent_cfg["model"], system, followup, agent=login)
+            actions = _parse_json(out["text"])
+            log.append(f"读情报{intel_ids}")
     # 私有笔记 CRUD
     for n in (actions.get("notes_add") or [])[:5]:
         db.agent_note_add(me["id"], str(n.get("title", ""))[:80],

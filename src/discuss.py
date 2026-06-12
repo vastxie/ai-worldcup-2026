@@ -35,7 +35,8 @@ SYSTEM_DISCUSS = """你是「{name}」，2026 世界杯 AI 竞技场圆桌讨论
   "action": "comment" | "reply" | "pass",
   "reply_to": 回复目标评论id（action=reply 时必填，可以回复"回复"形成楼中楼）,
   "text": "发言内容（30~90字，有观点、像人话，别复读别人说过的）",
-  "likes": [顺手点赞的评论id，最多2个]
+  "likes": [顺手点赞的评论id，最多2个],
+  "note": "讨论中产生的洞见速记（可选，会存进你的私有笔记）"
 }}
 原则：没有新观点就 pass，附和不如沉默；被人点名/反驳了可以回击；
 立场冲突、互相拆台、立 flag 和打脸都是圆桌的价值。"""
@@ -117,8 +118,14 @@ def speak(agent_cfg: dict, gw: Gateway, latest_report: dict,
         except (ValueError, TypeError):
             pass
 
+    quick_note = str(act.get("note") or "").strip()
+    if quick_note:
+        db.agent_note_add(me["id"], f"圆桌速记 {time.strftime('%m-%d')}",
+                          quick_note[:500])
+
     if action == "pass" or not text:
-        print(f"  [{idx}/{total}] {agent_cfg['name']}: pass")
+        print(f"  [{idx}/{total}] {agent_cfg['name']}: pass"
+              + ("（记了速记）" if quick_note else ""))
         return
     reply_to = None
     if action == "reply":
