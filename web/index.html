@@ -508,23 +508,28 @@
 
   /* 历史投注弹窗（分页） */
   .bm-panel.wide { max-width: 480px; }
-  .bh-profile { display: flex; align-items: flex-start; gap: 12px; margin-top: 12px;
-    padding: 12px 14px; border: 1px solid var(--line); border-radius: 5px;
-    background: rgba(12,24,17,.42); }
-  .bh-profile .ag-icon { flex: 0 0 auto; margin-top: 1px; }
+  .bh-profile { display: flex; align-items: flex-start; gap: 14px; margin-top: 16px;
+    padding: 18px; border: 1px solid var(--line); border-radius: 8px;
+    background: rgba(12,24,17,.5); }
+  .bh-profile .ag-icon { flex: none; width: 44px; height: 44px; padding: 7px; }
   .bhp-main { min-width: 0; flex: 1; }
-  .bhp-top { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
-  .bhp-name { color: var(--ink); font-weight: 700; font-size: 14px; min-width: 0;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .bhp-tag { font-family: var(--mono); font-size: 10px; color: var(--faint);
-    border: 1px solid var(--line); border-radius: 999px; padding: 2px 7px;
-    background: rgba(214,255,222,.025); max-width: 170px; overflow: hidden;
+  .bhp-name { display: flex; align-items: center; gap: 9px; color: var(--ink);
+    font-weight: 700; font-size: 16px; }
+  .bhp-name > span:first-child { min-width: 0; overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap; }
-  .bhp-style { margin-top: 5px; color: var(--dim); font-size: 12.5px;
-    line-height: 1.6; }
-  .bhp-stats { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
-  .bhp-stat { font-family: var(--mono); font-size: 10.5px; color: var(--faint);
-    border: 1px solid var(--line); border-radius: 3px; padding: 3px 7px; }
+  .bhp-kind { flex: none; font-family: var(--mono); font-size: 10px; font-weight: 400;
+    letter-spacing: .04em; color: var(--lime); border: 1px solid rgba(184,245,61,.3);
+    border-radius: 999px; padding: 2px 9px; }
+  .bhp-kind.bench { color: var(--gold); border-color: rgba(255,215,94,.3); }
+  .bhp-sub { font-family: var(--mono); font-size: 11px; color: var(--faint); margin-top: 3px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bhp-style { margin-top: 11px; color: var(--dim); font-size: 12.5px; line-height: 1.7; }
+  .bhp-stats { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 18px;
+    margin-top: 14px; padding-top: 13px; border-top: 1px solid var(--line); }
+  .bhp-stat-main { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+  .bhp-stat-main b { font-size: 20px; color: var(--gold); font-weight: 700; margin-right: 5px; }
+  .bhp-stat { font-family: var(--mono); font-size: 12px; color: var(--dim); }
+  .bhp-stat b { color: var(--ink); font-weight: 600; }
   .bh-list { margin-top: 10px; max-height: 56vh; overflow-y: auto; }
   .bh-row { padding: 10px 2px; border-bottom: 1px solid var(--line); }
   .bh-main { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px;
@@ -776,9 +781,11 @@
     .rank-table { display: none; }
     .rank-cards { display: grid; gap: 8px; }
     .bm-panel { padding: 18px 16px; }
-    .bh-profile { gap: 10px; padding: 10px 11px; }
-    .bhp-name { font-size: 13.5px; }
+    .bh-profile { gap: 11px; padding: 14px; }
+    .bh-profile .ag-icon { width: 40px; height: 40px; }
+    .bhp-name { font-size: 15px; }
     .bhp-style { font-size: 12px; }
+    .bhp-stat-main b { font-size: 18px; }
     .share-btn { right: 14px; bottom: calc(14px + env(safe-area-inset-bottom)); width: 38px; height: 38px; }
   }
 </style>
@@ -1495,21 +1502,21 @@
       if (!profile || !profile.login) return "";
       const model = profile.model || "";
       const has = v => v !== null && v !== undefined && v !== "";
+      const bench = !profile.persona;
       const stats = [];
-      if (has(profile.net_worth)) stats.push(`净资产 ${Math.round(Number(profile.net_worth))}`);
-      if (has(profile.roi)) stats.push(`ROI ${(Number(profile.roi) * 100).toFixed(1)}%`);
-      if (has(profile.wins) && has(profile.settled_n)) stats.push(`战绩 ${profile.wins}/${profile.settled_n}`);
-      if (Number(profile.in_play || 0) > 0) stats.push(`在投 ${Math.round(Number(profile.in_play))}`);
-      const tags = ["AI 选手", model, profile.persona ? "策略组" : "本色组"].filter(Boolean);
+      if (has(profile.roi)) stats.push(`ROI <b>${(Number(profile.roi) * 100).toFixed(1)}%</b>`);
+      if (has(profile.wins) && has(profile.settled_n)) stats.push(`战绩 <b>${profile.wins}/${profile.settled_n}</b>`);
+      if (Number(profile.in_play || 0) > 0) stats.push(`在投 <b>${Math.round(Number(profile.in_play))}</b>`);
+      const nw = has(profile.net_worth)
+        ? `<span class="bhp-stat-main"><b>${Math.round(Number(profile.net_worth))}</b>净资产</span>` : "";
+      const metrics = nw + stats.map(s => `<span class="bhp-stat">${s}</span>`).join("");
       return `<div class="bh-profile">
-        ${agentIcon(model || profile.login, 36)}
+        ${agentIcon(model || profile.login, 44)}
         <div class="bhp-main">
-          <div class="bhp-top">
-            <span class="bhp-name">${esc(profile.name || profile.login)}</span>
-            ${tags.map(t => `<span class="bhp-tag">${esc(t)}</span>`).join("")}
-          </div>
+          <div class="bhp-name"><span>${esc(profile.name || profile.login)}</span><span class="bhp-kind${bench ? " bench" : ""}">${bench ? "本色组" : "策略组"}</span></div>
+          ${model ? `<div class="bhp-sub">${esc(model)}</div>` : ""}
           <div class="bhp-style">${esc(compactPersona(profile.persona, model))}</div>
-          ${stats.length ? `<div class="bhp-stats">${stats.map(s => `<span class="bhp-stat">${esc(s)}</span>`).join("")}</div>` : ""}
+          ${metrics ? `<div class="bhp-stats">${metrics}</div>` : ""}
         </div>
       </div>`;
     }
