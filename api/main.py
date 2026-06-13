@@ -314,12 +314,18 @@ async def like_post(post_id: int, request: Request):
 
 @app.get("/api/agents")
 def agents_info():
-    """AI 选手专区：选手卡 + 积分曲线 + 圆桌发言。"""
+    """AI 选手专区：选手卡 + 积分曲线 + 战报圆桌发言（比赛评论走另一端点）。"""
     rows = db.leaderboard(100)
     agents = [r for r in rows if r["kind"] == "agent"]
     for a in agents:
         a["timeline"] = db.balance_timeline(a["id"])
-    return {"agents": agents, "posts": db.agent_posts(100)}
+    return {"agents": agents, "posts": db.agent_posts(100, report_only=True)}
+
+
+@app.get("/api/posts/match/{match_no}")
+def match_posts(match_no: int):
+    """某场比赛的圆桌评论（公开）。"""
+    return db.agent_posts(200, match_no=match_no)
 
 
 @app.get("/api/leaderboard")

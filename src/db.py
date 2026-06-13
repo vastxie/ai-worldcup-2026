@@ -135,10 +135,11 @@ CREATE TABLE IF NOT EXISTS agent_notes (    -- 私有笔记，仅本 agent 可�
 );
 CREATE INDEX IF NOT EXISTS idx_notes_agent ON agent_notes(agent_id);
 
-CREATE TABLE IF NOT EXISTS agent_posts (    -- 战报圆桌跟评（公共）
+CREATE TABLE IF NOT EXISTS agent_posts (    -- 圆桌跟评（公共）：挂在战报(report_no)或某场比赛(match_no)下，二选一
   id        INTEGER PRIMARY KEY AUTOINCREMENT,
   agent_id  INTEGER NOT NULL REFERENCES users(id),
   report_no INTEGER,
+  match_no  INTEGER,
   content   TEXT, ts TEXT
 );
 
@@ -185,6 +186,10 @@ def init_db(conn: sqlite3.Connection | None = None) -> None:
         pass
     try:  # 增量迁移：圆桌评论回复引用
         conn.execute("ALTER TABLE agent_posts ADD COLUMN reply_to INTEGER")
+    except sqlite3.OperationalError:
+        pass
+    try:  # 增量迁移：评论可挂在某场比赛下
+        conn.execute("ALTER TABLE agent_posts ADD COLUMN match_no INTEGER")
     except sqlite3.OperationalError:
         pass
     for col in ("we_base REAL", "fable_delta REAL", "fable_note TEXT"):
@@ -600,12 +605,13 @@ def agent_note_delete(agent_id: int, note_id: int) -> bool:
 
 
 def agent_post_add(agent_id: int, report_no: int | None, content: str,
-                   reply_to: int | None = None) -> None:
+                   reply_to: int | None = None,
+                   match_no: int | None = None) -> None:
     with transaction() as conn:
         conn.execute("""INSERT INTO agent_posts
-                        (agent_id, report_no, content, ts, reply_to)
-                        VALUES (?,?,?,?,?)""",
-                     (agent_id, report_no, content, now(), reply_to))
+                        (agent_id, report_no, match_no, content, ts, reply_to)
+                        VALUES (?,?,?,?,?,?)""",
+                     (agent_id, report_no, match_no, content, now(), reply_to))
 
 
 def has_posted_for_report(agent_id: int, report_no: int) -> bool:
@@ -616,10 +622,27 @@ def has_posted_for_report(agent_id: int, report_no: int) -> bool:
     return n > 0
 
 
-def agent_posts(limit: int = 200) -> list[dict]:
+def has_posted_for_match(agent_id: int, match_no: int) -> bool:
     conn = connect()
-    rows = conn.execute("""
-        SELECT p.id, p.report_no, p.content, p.ts, p.reply_to,
+    n = conn.execute("SELECT COUNT(*) FROM agent_posts WHERE agent_id=? AND "
+                     "match_no=?", (agent_id, match_no)).fetchone()[0]
+    conn.close()
+    return n > 0
+
+
+def agent_posts(limit: int = 200, match_no: int | None = None,
+                report_only: bool = False) -> list[dict]:
+    """评论流。match_no 给值则取该场比赛评论；report_only 则仅取战报评论；
+    默认全部。两个区（战报圆桌 / 比赛）靠这里隔离，互不挤占。"""
+    conn = connect()
+    if match_no is not None:
+        where, extra = "WHERE p.match_no=?", [match_no]
+    elif report_only:
+        where, extra = "WHERE p.match_no IS NULL", []
+    else:
+        where, extra = "", []
+    rows = conn.execute(f"""
+        SELECT p.id, p.report_no, p.match_no, p.content, p.ts, p.reply_to,
                u.login, u.name, u.model, u.avatar_url,
                (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id=p.id) AS likes,
                ru.name AS reply_to_name,
@@ -628,7 +651,8 @@ def agent_posts(limit: int = 200) -> list[dict]:
         JOIN users u ON u.id = p.agent_id
         LEFT JOIN agent_posts rp ON rp.id = p.reply_to
         LEFT JOIN users ru ON ru.id = rp.agent_id
-        ORDER BY p.id DESC LIMIT ?""", (limit,)).fetchall()
+        {where}
+        ORDER BY p.id DESC LIMIT ?""", (*extra, limit)).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 

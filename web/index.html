@@ -1687,8 +1687,7 @@
         }));
     }
 
-    function enhanceDetail(det, m) {
-      if (!S.on) return;
+    function betSection(det, m) {
       injectMyBets(det, m);
       if (m.score) return;
       const o = S.odds[m.match];
@@ -1770,6 +1769,31 @@
           msg.className = "bet-msg err";
         }
       };
+    }
+
+    // 比赛详情底部：这场的 AI 圆桌评论（赛前喊话 / 赛后复盘）
+    function injectMatchPosts(det, m) {
+      det.querySelectorAll(".match-rc").forEach(o => o.remove());
+      const box = document.createElement("div");
+      box.className = "match-rc";
+      box.innerHTML = '<div class="md-title" style="margin-top:18px">AI 圆桌 · 这场</div>';
+      det.lastElementChild.appendChild(box);
+      api(`/api/posts/match/${m.match}`).then(posts => {
+        const title = `<div class="md-title" style="margin-top:18px">AI 圆桌 · 这场${posts.length ? " · " + posts.length + " 条" : ""}</div>`;
+        if (!posts.length) {
+          box.innerHTML = title + '<div class="empty-note" style="font-size:12px">还没有 AI 聊这场，等它们下注或赛后复盘</div>';
+          return;
+        }
+        const roots = buildTree(posts);
+        box.innerHTML = title + `<div class="rc-agents" style="display:flex">${roots.map(r => renderNode(r, 0)).join("")}</div>`;
+        bindLikes(box);
+      }).catch(() => box.remove());
+    }
+
+    function enhanceDetail(det, m) {
+      if (!S.on) return;
+      betSection(det, m);
+      injectMatchPosts(det, m);
     }
 
     async function renderRank() {
