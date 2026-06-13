@@ -210,6 +210,15 @@
     background: none; border: 1px solid var(--line); border-radius: 2px; padding: 7px 14px; cursor: pointer; }
   .fbtn:hover { color: var(--ink); border-color: var(--line-strong); }
   .fbtn.on { color: var(--bg); background: var(--lime); border-color: var(--lime); font-weight: 600; }
+  .filter-primary { align-items: center; margin-bottom: 12px; }
+  .filter-toggle.on { color: var(--lime); background: rgba(184,245,61,.06); border-color: var(--line-strong); }
+  .filter-panel { display: none; border: 1px solid var(--line); border-radius: 4px;
+    background: rgba(12,24,17,.35); padding: 12px 14px; margin: 0 0 24px; }
+  .filter-panel.open { display: block; }
+  .filter-row { display: grid; grid-template-columns: 58px 1fr; gap: 10px; align-items: start; padding: 8px 0; }
+  .filter-row + .filter-row { border-top: 1px dashed var(--line); }
+  .filter-label { font-family: var(--mono); font-size: 11px; color: var(--faint); letter-spacing: .16em; padding-top: 7px; }
+  .filter-panel .filters { margin-bottom: 0; }
   /* ---- 球队筛选弹窗 ---- */
   .team-pick-wrap { position: relative; margin-left: auto; }
   .team-pick-btn { font-family: var(--mono); font-size: 12px; color: var(--dim);
@@ -342,6 +351,16 @@
     color: var(--dim); text-decoration: none; }
   .rc-more:hover { color: var(--lime); }
   .rc-body { font-size: 14.5px; line-height: 2.05; color: var(--ink); }
+  .rc-summary { font-size: 14px; line-height: 1.85; color: var(--ink); }
+  .report-card.collapsed-report .rc-body { display: none; }
+  .report-card.open-report .rc-body { display: block; }
+  .report-card.open-report .rc-summary { display: none; }
+  .rc-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+  .rc-action-link, .rc-read { font-family: var(--mono); font-size: 11.5px; color: var(--lime);
+    display: inline-flex; align-items: center; text-decoration: none; background: none; border: 1px solid var(--line); border-radius: 2px;
+    padding: 6px 12px; cursor: pointer; }
+  .rc-read { margin-top: 12px; }
+  .rc-action-link:hover, .rc-read:hover { border-color: var(--lime); background: rgba(184,245,61,.06); }
   .rc-comment { display: flex; gap: 13px; margin-top: 16px; padding: 13px 16px;
     border-left: 2px solid var(--gold); background: rgba(255, 215, 94, .045);
     border-radius: 0 3px 3px 0; }
@@ -579,7 +598,11 @@
   .lg-item:hover { border-color: var(--line-strong); color: var(--ink); }
   .lg-item i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
   .lg-bench { color: var(--gold); font-size: 9px; margin-left: 2px; }
+  .ag-legend-more { display: none; font-family: var(--mono); font-size: 11px; color: var(--dim);
+    background: none; border: 1px solid var(--line); border-radius: 3px; padding: 3px 9px; cursor: pointer; }
+  .ag-legend-more:hover { color: var(--lime); border-color: var(--line-strong); }
   .rank-table tr.flash td { animation: rowflash 2.4s ease-out; }
+  .rank-card.flash { animation: rowflash 2.4s ease-out; }
   @keyframes rowflash { 0% { background: rgba(184,245,61,.26); } 100% { background: transparent; } }
   .arena-chart g.cline { transition: opacity .15s; pointer-events: none; }
   .arena-chart svg.hovering g.cline:not(.hov) { opacity: .12; }
@@ -631,6 +654,21 @@
   .rank-table .nw { color: var(--gold); font-weight: 600; }
   .ai-badge { font-family: var(--mono); font-size: 9px; color: var(--lime);
     border: 1px solid rgba(184,245,61,.4); border-radius: 2px; padding: 0 4px; }
+  .rank-cards { display: none; }
+  .rank-card { border: 1px solid var(--line); border-radius: 4px; background: rgba(12,24,17,.45);
+    padding: 12px 14px; }
+  .rank-card.rk-click { cursor: pointer; }
+  .rank-card.rk-click:hover { border-color: var(--line-strong); }
+  .rank-card-top { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; }
+  .rank-card-rk { font-family: var(--mono); color: var(--faint); font-size: 12px; }
+  .rank-card-main { min-width: 0; }
+  .rank-card-name { display: flex; align-items: center; gap: 7px; min-width: 0; color: var(--ink); font-weight: 700; }
+  .rank-card-name .who-cell { min-width: 0; }
+  .rank-card-name .who-cell span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rank-card-value { font-family: var(--mono); color: var(--gold); font-weight: 700; }
+  .rank-card-metrics { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .rank-card-metrics span { font-family: var(--mono); font-size: 10.5px; color: var(--faint);
+    border: 1px solid var(--line); border-radius: 2px; padding: 2px 6px; }
 
   /* ---- 移动端长图预览 ---- */
   .img-overlay { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column;
@@ -687,6 +725,13 @@
     .tm-toggle { margin-left: 0; }
     .tm-pill { font-size: 11px; }
     .year-bg { font-size: 110px; top: -4px; right: -12px; }
+    .report-card { padding: 16px 16px 14px; }
+    .rc-head { align-items: flex-start; flex-wrap: wrap; gap: 8px; }
+    .rc-more { margin-left: 0; }
+    .rc-body { font-size: 13.5px; line-height: 1.9; }
+    .rc-summary { font-size: 13.5px; line-height: 1.8; }
+    .filter-row { grid-template-columns: 1fr; gap: 8px; }
+    .filter-label { padding-top: 0; }
     .podium-pct { font-size: 42px; }
     .row { grid-template-columns: 22px 108px 1fr 54px; gap: 7px; }
     .row .elo, .row .tag { display: none; }
@@ -705,6 +750,11 @@
     .fmatch { padding: 12px 14px; }
     .fmatch .side { font-size: 14px; }
     .heat { font-size: 9px; }
+    .arena-chart { padding: 14px 12px; }
+    .ag-legend.collapsed .lg-extra { display: none; }
+    .ag-legend-more { display: inline-flex; }
+    .rank-table { display: none; }
+    .rank-cards { display: grid; gap: 8px; }
     .share-btn { right: 14px; bottom: calc(14px + env(safe-area-inset-bottom)); width: 38px; height: 38px; }
   }
 </style>
@@ -753,15 +803,18 @@
     <!-- 赛程 -->
     <section class="tab" id="tab-schedule">
       <div class="sec-head"><span class="sec-no">04</span><h2>赛程 · 比分 · 预测</h2><div class="rule"></div></div>
-      <div class="filters" id="stage-filters"></div>
-      <div class="filters" id="status-filters"></div>
+      <div class="filters filter-primary" id="status-filters"></div>
+      <div class="filter-panel" id="advanced-filters">
+        <div class="filter-row"><span class="filter-label">阶段</span><div class="filters" id="stage-filters"></div></div>
+        <div class="filter-row"><span class="filter-label">球队</span><div class="filters" id="team-filter"></div></div>
+      </div>
       <div id="schedule-list"></div>
     </section>
 
     <!-- 小组 -->
     <section class="tab" id="tab-groups">
       <div class="sec-head"><span class="sec-no">05</span><h2>小组形势</h2><div class="rule"></div><span class="sec-note">积分为实际 · 概率为模拟</span></div>
-      <div class="groups" id="groups"></div>
+      <div class="groups" id="group-list"></div>
     </section>
 
     <!-- 排行榜 -->
@@ -883,19 +936,42 @@
   /* ===== AI 战报 ===== */
   (function reports() {
     const R = (window.WC_REPORTS || []).slice();
-    const card = (r, withMore) => `
-      <div class="report-card" data-no="${r.no}">
+    const summary = (text, limit = 118) => {
+      const clean = String(text || "").replace(/\s+/g, " ").trim();
+      if (!clean) return "";
+      const stop = clean.search(/[。！？]/);
+      const n = stop >= 32 && stop <= limit + 24 ? stop + 1 : limit;
+      const out = clean.slice(0, n);
+      return out + (out.length < clean.length ? "…" : "");
+    };
+    const card = (r, mode) => {
+      const home = mode === "home";
+      return `
+      <div class="report-card ${home ? "home-report" : "collapsed-report"}" data-no="${r.no}">
         <div class="rc-head">
           <span class="rc-tag">AI 战报</span>
           <span class="rc-no">第 ${r.no} 期 · ${esc(r.date.slice(5))} ${esc(r.time)} · 已赛 ${r.played} 场</span>
-          ${withMore ? '<a class="rc-more" href="#reports">往期战报 →</a>' : ""}
+          ${home ? '<a class="rc-more" href="#reports">往期战报 →</a>' : ""}
         </div>
-        <div class="rc-body">${esc(r.report)}</div>
+        <div class="rc-summary">${esc(summary(r.report, home ? 120 : 132))}</div>
+        ${home
+          ? '<div class="rc-actions"><a class="rc-action-link" href="#reports">阅读全文 →</a></div>'
+          : `<div class="rc-body">${esc(r.report)}</div><button class="rc-read" type="button" aria-expanded="false">阅读全文 ↓</button>`}
       </div>`;
+    };
     if (R.length) {
-      document.getElementById("daily-report").innerHTML = card(R[R.length - 1], true);
+      document.getElementById("daily-report").innerHTML = card(R[R.length - 1], "home");
       document.getElementById("reports-list").innerHTML =
-        R.slice().reverse().map(r => card(r, false)).join("");
+        R.slice().reverse().map(r => card(r, "list")).join("");
+      document.getElementById("reports-list").addEventListener("click", e => {
+        const btn = e.target.closest(".rc-read");
+        if (!btn) return;
+        const cardEl = btn.closest(".report-card");
+        const open = !cardEl.classList.contains("open-report");
+        cardEl.classList.toggle("open-report", open);
+        btn.setAttribute("aria-expanded", String(open));
+        btn.textContent = open ? "收起 ↑" : "阅读全文 ↓";
+      });
     } else {
       document.getElementById("reports-list").innerHTML =
         '<div class="empty-note">首期战报正在路上</div>';
@@ -1071,7 +1147,7 @@
   /* ===== 赛程 ===== */
   const SFILTERS = [["all","全部"],["group","小组赛"],["r32","32强"],["r16","16强"],["qf","1/4决赛"],["sf","半决赛"],["finals","决赛&季军"]];
   const TFILTERS = [["all","全部"],["upcoming","未赛"],["played","已赛"],["today","今日"]];
-  let stageF = "all", statusF = "all", teamF = "all";
+  let stageF = "all", statusF = "all", teamF = "all", filterMoreOpen = false;
   const todayStr = new Date().toLocaleDateString("zh-CN");
   const byMatch = {}; D.schedule.forEach(m => byMatch[m.match] = m);
 
@@ -1226,12 +1302,22 @@
     el.onclick = e => { if (e.target.dataset.v) cb(e.target.dataset.v); };
   }
   function refreshScheduleUI() {
-    renderFilters("stage-filters", SFILTERS, stageF, v => { stageF = v; refreshScheduleUI(); });
     renderFilters("status-filters", TFILTERS, statusF, v => { statusF = v; refreshScheduleUI(); });
+    const activeAdvanced = stageF !== "all" || teamF !== "all";
+    const activeN = (stageF !== "all" ? 1 : 0) + (teamF !== "all" ? 1 : 0);
+    document.getElementById("status-filters").insertAdjacentHTML("beforeend",
+      `<button class="fbtn filter-toggle${filterMoreOpen || activeAdvanced ? " on" : ""}" type="button">筛选${activeN ? " · " + activeN : ""} ▾</button>`);
+    document.querySelector("#status-filters .filter-toggle").onclick = () => {
+      filterMoreOpen = !filterMoreOpen;
+      refreshScheduleUI();
+    };
+    renderFilters("stage-filters", SFILTERS, stageF, v => { stageF = v; refreshScheduleUI(); });
+    const panel = document.getElementById("advanced-filters");
+    panel.classList.toggle("open", filterMoreOpen || activeAdvanced);
     const groupsByLetter = {};
     D.teams.forEach(t => (groupsByLetter[t.group] = groupsByLetter[t.group] || []).push(t));
     const picked = teamF !== "all" ? byCode[teamF] : null;
-    document.getElementById("status-filters").insertAdjacentHTML("beforeend", `
+    document.getElementById("team-filter").innerHTML = `
       <span class="team-pick-wrap">
         <button class="team-pick-btn${picked ? " picked" : ""}">${picked ? (FLAG[picked.code] || "") + " " + esc(picked.name_zh) : "按球队筛选"} ▾</button>
         <div class="team-backdrop"></div>
@@ -1246,8 +1332,8 @@
                 `<button class="tp-chip${t.code === teamF ? " on" : ""}" data-team="${t.code}">${FLAG[t.code] || ""} ${esc(t.name_zh)}</button>`).join("")}</span>
             </div>`).join("")}
         </div>
-      </span>`);
-    const wrap = document.querySelector("#status-filters .team-pick-wrap");
+      </span>`;
+    const wrap = document.querySelector("#team-filter .team-pick-wrap");
     const pop = wrap.querySelector(".team-pop");
     const backdrop = wrap.querySelector(".team-backdrop");
     const setPopOpen = o => {
@@ -1278,7 +1364,7 @@
   /* ===== 小组 ===== */
   const groups = {};
   D.teams.forEach(t => (groups[t.group] = groups[t.group] || []).push(t));
-  document.getElementById("groups").innerHTML = "ABCDEFGHIJKL".split("").map(g => {
+  document.getElementById("group-list").innerHTML = "ABCDEFGHIJKL".split("").map(g => {
     const list = (groups[g] || []).slice().sort((a, b) =>
       (b.live.pts - a.live.pts) || ((b.live.gf - b.live.ga) - (a.live.gf - a.live.ga)) || (b.p_r32 - a.p_r32));
     return `<div class="gcard">
@@ -1490,18 +1576,18 @@
       });
       svg += "</svg>";
       const legend = agents.map((a, ai) =>
-        `<button class="lg-item" data-agent="${esc(a.login)}" title="${esc(a.model || "")}">
+        `<button class="lg-item${ai >= 6 ? " lg-extra" : ""}" data-agent="${esc(a.login)}" title="${esc(a.model || "")}">
           <i style="background:${agentColor(ai)}"></i>${esc(a.name || a.login)}${a.persona ? "" : '<span class="lg-bench">本色</span>'}
         </button>`).join("");
       return `<div class="arena-chart">
-        <div class="md-title" style="margin-bottom:10px">AI 积分波动 · 与人类同规则同赔率 · 点击折线或图例查看战绩</div>
-        ${svg}<div class="ag-legend">${legend}</div></div>`;
+        <div class="md-title" style="margin-bottom:10px">AI 积分波动</div>
+        ${svg}<div class="ag-legend collapsed">${legend}<button class="ag-legend-more" type="button">全部 AI ▾</button></div></div>`;
     }
 
     // 从图表/图例跳到排行榜对应行并闪烁高亮
     function gotoRankRow(login) {
-      const sel = `.rank-table tr[data-login="${(window.CSS && CSS.escape) ? CSS.escape(login) : login}"]`;
-      const row = document.querySelector(sel);
+      const sel = `.rk-click[data-login="${(window.CSS && CSS.escape) ? CSS.escape(login) : login}"]`;
+      const row = [...document.querySelectorAll(sel)].find(x => x.offsetParent !== null) || document.querySelector(sel);
       if (!row) return;
       row.scrollIntoView({ behavior: "smooth", block: "center" });
       row.classList.remove("flash"); void row.offsetWidth;
@@ -1510,6 +1596,13 @@
 
     function bindLegend() {
       const svg = document.querySelector(".arena-chart svg");
+      const more = document.querySelector(".ag-legend-more");
+      if (more) more.onclick = () => {
+        const legend = more.closest(".ag-legend");
+        const open = legend.classList.toggle("expanded");
+        legend.classList.toggle("collapsed", !open);
+        more.textContent = open ? "收起 AI ▴" : "全部 AI ▾";
+      };
       document.querySelectorAll(".ag-legend .lg-item").forEach(btn => {
         const hl = on => {
           if (!svg) return;
@@ -1949,16 +2042,33 @@
           el.innerHTML = '<div class="empty-note">虚位以待 — GitHub 登录即领 1000 积分，开球前皆可下注</div>';
           return;
         }
+        const canOpen = r => r.kind === "agent" || (S.me && r.login === S.me.login);
+        const whoHtml = r => `<span class="who-cell">${r.kind === "agent" ? agentIcon(r.model || r.login, 24) : (r.avatar_url ? `<img src="${r.avatar_url}">` : "")}${esc(r.name || r.login || "?")}${r.kind === "agent" ? '<span class="ai-badge">AI</span>' : ""}</span>`;
+        const rowAttrs = r => `data-login="${esc(r.login || "")}" data-kind="${r.kind}" data-name="${esc(r.name || r.login || "?")}"${canOpen(r) ? ' class="rk-click" title="查看投注记录"' : ""}`;
         el.innerHTML = `<table class="rank-table">
           <tr><th>#</th><th>玩家</th><th>净资产</th><th>可用</th><th>在投</th><th>ROI</th><th>胜/已结</th></tr>` +
-          rows.map((r, i) => `<tr data-login="${esc(r.login || "")}" data-kind="${r.kind}" data-name="${esc(r.name || r.login || "?")}"${r.kind === "agent" || (S.me && r.login === S.me.login) ? ' class="rk-click" title="查看投注记录"' : ""}>
+          rows.map((r, i) => `<tr ${rowAttrs(r)}>
             <td class="rk">${i + 1}</td>
-            <td><span class="who-cell">${r.kind === "agent" ? agentIcon(r.model || r.login, 24) : (r.avatar_url ? `<img src="${r.avatar_url}">` : "")}${esc(r.name || r.login || "?")}${r.kind === "agent" ? '<span class="ai-badge">AI</span>' : ""}</span></td>
+            <td>${whoHtml(r)}</td>
             <td class="nw">${r.net_worth}</td><td>${r.balance}</td><td>${r.in_play}</td>
             <td>${r.roi == null ? "—" : (r.roi * 100).toFixed(1) + "%"}</td>
-            <td>${r.wins}/${r.settled_n}</td></tr>`).join("") + "</table>";
+            <td>${r.wins}/${r.settled_n}</td></tr>`).join("") + "</table>" +
+          `<div class="rank-cards">` + rows.map((r, i) => `
+            <div class="rank-card${canOpen(r) ? " rk-click" : ""}" data-login="${esc(r.login || "")}" data-kind="${r.kind}" data-name="${esc(r.name || r.login || "?")}"${canOpen(r) ? ' title="查看投注记录"' : ""}>
+              <div class="rank-card-top">
+                <span class="rank-card-rk">#${i + 1}</span>
+                <div class="rank-card-main"><div class="rank-card-name">${whoHtml(r)}</div></div>
+                <span class="rank-card-value">${r.net_worth}</span>
+              </div>
+              <div class="rank-card-metrics">
+                <span>战绩 ${r.wins}/${r.settled_n}</span>
+                <span>ROI ${r.roi == null ? "—" : (r.roi * 100).toFixed(1) + "%"}</span>
+                <span>可用 ${r.balance}</span>
+                <span>在投 ${r.in_play}</span>
+              </div>
+            </div>`).join("") + `</div>`;
         // AI 行人人可点；人类只有自己那一行可点（互相不可查）
-        el.querySelectorAll("tr.rk-click").forEach(tr =>
+        el.querySelectorAll(".rk-click").forEach(tr =>
           tr.addEventListener("click", async () => {
             const login = tr.dataset.login;
             if (S.me && login === S.me.login && tr.dataset.kind !== "agent") {
