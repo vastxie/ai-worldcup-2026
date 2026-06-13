@@ -4,6 +4,7 @@
     python3 -m src.update                        # 完整更新（默认 100 万次模拟）
     python3 -m src.update --sims 100000000       # 一亿次（多进程，约 20~30 分钟）
     python3 -m src.update --no-fetch             # 跳过联网，只用本地数据重算
+    python3 -m src.update --no-fetch --dry-run   # 临时 DB 试算，不发布产物
 
 每次运行会：
 1. 同步 104 场赛程与最新比分（失败自动降级为本地数据）；
@@ -11,6 +12,8 @@
 3. 以"已赛结果固定、未赛掷骰子"的方式做全程蒙特卡洛（自动多进程并行）；
 4. 对所有未赛且对阵已知的比赛给出胜平负概率、比分概率矩阵；
 5. 写 web/data.js、out/results.json，并在 data/history.json 追加当日夺冠概率快照。
+发布前会拒绝用已赛场次或模拟次数回退的结果覆盖现有产物；确认覆盖可加
+--force-publish。
 """
 
 from __future__ import annotations
@@ -20,11 +23,15 @@ import json
 import multiprocessing as mp
 import os
 import random
+import sqlite3
+import tempfile
 import time
 from collections import Counter
+from contextlib import contextmanager
 from pathlib import Path
 
 from . import db, fetch, odds, report
+from .utils import atomic_write_text
 from .model import match_probabilities, score_grid
 from .state import build_state
 from .tournament import GROUPS, simulate_tournament
@@ -33,6 +40,30 @@ ROOT = Path(__file__).resolve().parent.parent
 STAGES = ["r32", "r16", "qf", "sf", "final", "champion"]
 STAGE_ZH = {"r32": "晋级32强", "r16": "进16强", "qf": "进8强",
             "sf": "进4强", "final": "进决赛", "champion": "夺冠"}
+
+
+@contextmanager
+def isolated_db(enabled: bool):
+    """dry-run 时用临时 DB 副本承接锁档/结算/历史写入，保护真实运行数据。"""
+    if not enabled:
+        yield
+        return
+    old_path = db.DB_PATH
+    with tempfile.TemporaryDirectory(prefix="wc-dry-run-") as tmp:
+        tmp_path = Path(tmp) / old_path.name
+        if old_path.exists():
+            src = sqlite3.connect(old_path)
+            dst = sqlite3.connect(tmp_path)
+            try:
+                src.backup(dst)
+            finally:
+                dst.close()
+                src.close()
+        db.DB_PATH = tmp_path
+        try:
+            yield
+        finally:
+            db.DB_PATH = old_path
 
 
 # ----------------------------------------------------------------- simulate --
@@ -215,14 +246,35 @@ def update_history(sim_out: dict, played: int, sims: int) -> list[dict]:
 def write_outputs(payload: dict) -> None:
     out_dir = ROOT / "out"
     out_dir.mkdir(exist_ok=True)
-    (out_dir / "results.json").write_text(
-        json.dumps(payload, ensure_ascii=False, indent=1), encoding="utf-8")
-    (ROOT / "web" / "data.js").write_text(
-        "window.WC_DATA = " + json.dumps(payload, ensure_ascii=False) + ";\n",
-        encoding="utf-8")
+    atomic_write_text(out_dir / "results.json",
+                      json.dumps(payload, ensure_ascii=False, indent=1))
+    atomic_write_text(ROOT / "web" / "data.js",
+                      "window.WC_DATA = "
+                      + json.dumps(payload, ensure_ascii=False) + ";\n")
 
 
-def print_report(payload: dict) -> None:
+def validate_publish_meta(played: int, sims: int, force: bool = False) -> None:
+    """避免用旧数据库/低样本 dry run 产物覆盖当前发布结果。"""
+    path = ROOT / "out" / "results.json"
+    if force or not path.exists():
+        return
+    try:
+        prev = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    old_meta = prev.get("meta", {})
+    problems = []
+    old_played, old_sims = old_meta.get("played", 0), old_meta.get("sims", 0)
+    if played < old_played:
+        problems.append(f"已赛场次回退 {played} < {old_played}")
+    if played <= old_played and sims < old_sims:
+        problems.append(f"模拟次数回退 {sims:,} < {old_sims:,}")
+    if problems:
+        raise SystemExit("  [publish] 拒绝覆盖当前产物：" + "；".join(problems)
+                         + "。确认要覆盖请加 --force-publish")
+
+
+def print_report(payload: dict, published: bool = True) -> None:
     teams = payload["teams"]
     name = {t["code"]: t["name_zh"] for t in teams}
     stats = payload["record"]["stats"]
@@ -266,13 +318,23 @@ def print_report(payload: dict) -> None:
         a, b = fm["pair"]
         print(f"    {name[a]} vs {name[b]:　<8}  {fm['p'] * 100:5.2f}%")
     print()
-    print("  数据已写入 web/data.js（网站）与 out/results.json")
+    if published:
+        print("  数据已写入 web/data.js（网站）与 out/results.json")
+    else:
+        print("  dry-run 仅完成试算，未写入 web/data.js 或 out/results.json")
 
 
 # --------------------------------------------------------------------- main --
 
 def run(sims: int, seed: int | None, do_fetch: bool,
-        workers: int | None = None) -> dict:
+        workers: int | None = None, dry_run: bool = False,
+        force_publish: bool = False) -> dict:
+    with isolated_db(dry_run):
+        return _run(sims, seed, do_fetch, workers, dry_run, force_publish)
+
+
+def _run(sims: int, seed: int | None, do_fetch: bool,
+         workers: int | None, dry_run: bool, force_publish: bool) -> dict:
     db.init_db()
     # 自举：库为空（如服务器首次切换）时自动从 JSON 迁移，保护 cron 不踩空
     conn = db.connect()
@@ -283,13 +345,20 @@ def run(sims: int, seed: int | None, do_fetch: bool,
         print("  [db] 数据库为空，自动从 JSON 迁移…")
         migrate.main()
 
-    if do_fetch:
+    if do_fetch and dry_run:
+        print("  [dry-run] 跳过联网同步，用本地数据试算（不消耗赔率 API 配额）")
+    elif do_fetch:
         fetch.sync()
         odds.sync()
 
     settled = db.settle_finished_bets()
     if settled:
         print(f"  [bets] 已结算 {settled} 笔投注")
+
+    publish_played = sum(1 for m in db.load_matches()
+                         if m["score"] and m["home"] and m["away"])
+    if not dry_run:
+        validate_publish_meta(publish_played, sims, force_publish)
 
     state = build_state()
     played = len(state["records"])
@@ -316,9 +385,12 @@ def run(sims: int, seed: int | None, do_fetch: bool,
         "top_title_matches": sim_out["top_title_matches"],
         "history": history,
     }
-    write_outputs(payload)
-    report.update_all(payload)
-    print_report(payload)
+    if dry_run:
+        print("  [dry-run] 已完成计算，未写入真实数据库或发布产物")
+    else:
+        write_outputs(payload)
+        report.update_all(payload)
+    print_report(payload, published=not dry_run)
     return payload
 
 
@@ -328,8 +400,13 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--workers", type=int, default=None)
     parser.add_argument("--no-fetch", action="store_true", help="跳过联网同步")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="用临时数据库计算，不写入发布产物")
+    parser.add_argument("--force-publish", action="store_true",
+                        help="允许覆盖已赛场次/模拟次数更高的现有产物")
     args = parser.parse_args()
-    run(args.sims, args.seed, not args.no_fetch, args.workers)
+    run(args.sims, args.seed, not args.no_fetch, args.workers,
+        args.dry_run, args.force_publish)
 
 
 if __name__ == "__main__":

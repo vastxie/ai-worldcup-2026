@@ -118,7 +118,7 @@ def load() -> dict | None:
     return None
 
 
-def sync(quiet: bool = False) -> dict | None:
+def sync(quiet: bool = False, dry_run: bool = False) -> dict | None:
     """按缓存时效抓取市场数据，返回最新缓存（失败返回旧缓存或 None）。"""
     key = _api_key()
     cache = load() or {}
@@ -130,17 +130,20 @@ def sync(quiet: bool = False) -> dict | None:
         if now - cache.get("h2h_ts", 0) > H2H_MAX_AGE:
             cache["h2h"] = _fetch_h2h(key)
             cache["h2h_ts"] = now
-            db.snapshot_odds("h2h", cache["h2h"])
+            if not dry_run:
+                db.snapshot_odds("h2h", cache["h2h"])
             if not quiet:
                 print(f"  [odds] 已更新 {len(cache['h2h'])} 场盘口")
         if now - cache.get("winner_ts", 0) > WINNER_MAX_AGE:
             cache["winner"] = _fetch_winner(key)
             cache["winner_ts"] = now
-            db.snapshot_odds("winner", cache["winner"])
+            if not dry_run:
+                db.snapshot_odds("winner", cache["winner"])
             if not quiet:
                 print(f"  [odds] 已更新夺冠赔率（{len(cache['winner'])} 队）")
-        CACHE.write_text(json.dumps(cache, ensure_ascii=False, indent=1),
-                         encoding="utf-8")
+        if not dry_run:
+            CACHE.write_text(json.dumps(cache, ensure_ascii=False, indent=1),
+                             encoding="utf-8")
     except Exception as exc:  # noqa: BLE001 - 市场数据可降级
         if not quiet:
             print(f"  [odds] 抓取失败（{exc}），沿用缓存/纯模型")

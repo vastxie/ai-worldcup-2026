@@ -16,6 +16,7 @@ import base64
 import hashlib
 import hmac
 import json
+import os
 import secrets
 import time
 import urllib.parse
@@ -23,7 +24,7 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
 import sys
@@ -31,10 +32,49 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src import db  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
-CONFIG = json.loads((ROOT / "data" / "config.json").read_text(encoding="utf-8"))
-OAUTH = CONFIG.get("github_oauth", {})
-SECRET = CONFIG["session_secret"].encode()
-SITE = "https://worldcup.lightai.io"
+
+def _load_config() -> dict:
+    path = Path(os.environ.get("WORLDCUP_CONFIG", ROOT / "data" / "config.json"))
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"配置文件不是合法 JSON: {path}") from exc
+
+
+def _env_first(*names: str) -> str | None:
+    for name in names:
+        value = os.environ.get(name)
+        if value:
+            return value
+    return None
+
+
+def _origin_list(value) -> list[str]:
+    if not value:
+        return []
+    if isinstance(value, str):
+        return [x.strip().rstrip("/") for x in value.split(",") if x.strip()]
+    return [str(x).strip().rstrip("/") for x in value if str(x).strip()]
+
+
+CONFIG = _load_config()
+SITE = (_env_first("WORLDCUP_SITE_URL", "SITE_URL")
+        or CONFIG.get("site_url") or "https://worldcup.lightai.io").rstrip("/")
+
+OAUTH = dict(CONFIG.get("github_oauth", {}))
+for env, key in (("GITHUB_CLIENT_ID", "client_id"),
+                 ("GITHUB_CLIENT_SECRET", "client_secret"),
+                 ("GITHUB_CALLBACK_URL", "callback_url")):
+    if os.environ.get(env):
+        OAUTH[key] = os.environ[env]
+
+SESSION_SECRET = (_env_first("WORLDCUP_SESSION_SECRET", "SESSION_SECRET")
+                  or CONFIG.get("session_secret"))
+if not SESSION_SECRET:
+    raise RuntimeError("缺少 session_secret：请设置 SESSION_SECRET 或 data/config.json")
+SECRET = SESSION_SECRET.encode()
 
 SESSION_COOKIE = "wc_session"
 SESSION_TTL = 30 * 24 * 3600
@@ -104,8 +144,19 @@ def rate_limit(request: Request, key: str, per_min: int) -> None:
         _BUCKETS.clear()
 
 
-ALLOWED_ORIGINS = (SITE, "http://localhost:8642", "http://localhost:8643",
-                   "http://127.0.0.1:8642", "http://127.0.0.1:8643")
+ALLOWED_ORIGINS = tuple(dict.fromkeys([
+    SITE, "http://localhost:8642", "http://localhost:8643",
+    "http://127.0.0.1:8642", "http://127.0.0.1:8643",
+    *_origin_list(_env_first("WORLDCUP_ALLOWED_ORIGINS", "ALLOWED_ORIGINS")),
+    *_origin_list(CONFIG.get("allowed_origins")),
+]))
+
+def require_oauth_config() -> dict:
+    missing = [k for k in ("client_id", "client_secret", "callback_url")
+               if not OAUTH.get(k)]
+    if missing:
+        raise HTTPException(503, "GitHub OAuth 未配置: " + ", ".join(missing))
+    return OAUTH
 
 def check_origin(request: Request) -> None:
     origin = request.headers.get("origin")
@@ -157,12 +208,13 @@ def health():
 
 @app.get("/api/auth/login")
 def auth_login():
+    oauth = require_oauth_config()
     state_payload = json.dumps({"n": secrets.token_hex(8),
                                 "exp": time.time() + 600}).encode()
     state = _sign(state_payload)
     url = ("https://github.com/login/oauth/authorize?" + urllib.parse.urlencode({
-        "client_id": OAUTH["client_id"],
-        "redirect_uri": OAUTH["callback_url"],
+        "client_id": oauth["client_id"],
+        "redirect_uri": oauth["callback_url"],
         "state": state,
     }))
     resp = RedirectResponse(url)
@@ -173,15 +225,16 @@ def auth_login():
 
 @app.get("/api/auth/callback")
 def auth_callback(request: Request, code: str = "", state: str = ""):
+    oauth = require_oauth_config()
     saved = request.cookies.get("wc_oauth_state")
     if not code or not state or state != saved or not _unsign(state):
         raise HTTPException(400, "OAuth state 校验失败，请重新登录")
 
     body = urllib.parse.urlencode({
-        "client_id": OAUTH["client_id"],
-        "client_secret": OAUTH["client_secret"],
+        "client_id": oauth["client_id"],
+        "client_secret": oauth["client_secret"],
         "code": code,
-        "redirect_uri": OAUTH["callback_url"],
+        "redirect_uri": oauth["callback_url"],
     }).encode()
     req = urllib.request.Request(
         "https://github.com/login/oauth/access_token", data=body,
@@ -275,7 +328,7 @@ def my_bets(request: Request):
 
 @app.get("/api/bets/match/{match_no}")
 def bets_of_match(match_no: int):
-    return db.match_bets(match_no)
+    return db.match_bets(match_no, agents_only=True)
 
 
 @app.get("/api/bets/agent/{login}")
@@ -289,13 +342,14 @@ def agent_bet_history(login: str):
 
 @app.get("/api/bets/recent")
 def recent_bets():
-    """全站最近投注流（含 AI），用于比赛卡角标与动态。"""
+    """公开最近 AI 投注流，用于比赛卡角标与动态。人类投注不上墙。"""
     conn = db.connect()
     rows = conn.execute("""
         SELECT b.match_no, b.pick, b.stake, b.odds, b.settled, b.payout,
                b.placed_at, b.reason, u.kind, u.login, u.name, u.avatar_url,
                u.model
         FROM bets b JOIN users u ON u.id=b.user_id
+        WHERE u.kind='agent'
         ORDER BY b.id DESC LIMIT 100""").fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -334,7 +388,14 @@ def get_leaderboard():
 
 
 @app.get("/api/timeline/{user_id}")
-def timeline(user_id: int):
+def timeline(user_id: int, request: Request):
+    target = db.get_user(user_id)
+    if not target:
+        raise HTTPException(404, "用户不存在")
+    if target["kind"] != "agent":
+        user = session_user(request)
+        if not user or user["id"] != user_id:
+            raise HTTPException(404, "只有 AI 选手的积分曲线是公开的")
     return db.balance_timeline(user_id)
 
 

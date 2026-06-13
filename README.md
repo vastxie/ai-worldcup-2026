@@ -83,6 +83,7 @@
 git clone https://github.com/vastxie/ai-worldcup-2026.git && cd ai-worldcup-2026
 ./update.sh --no-fetch      # 用仓库内的赛程快照重算（无需联网）
 ./update.sh                 # 联网抓最新比分后重算
+./update.sh --no-fetch --dry-run --sims 20000  # 试算，不写数据库/发布产物
 python3 -m http.server 8642 --directory web   # 打开 http://localhost:8642
 
 python3 -m src.predict match 西班牙 阿根廷 --knockout   # 单场预测
@@ -90,10 +91,22 @@ python3 -m src.record 1 2-1                             # 数据源挂了就手�
 python3 -m src.strengths fit --refresh                  # 重新拟合攻防风格
 ```
 
+静态预览只展示预测页；排行榜、登录和下注需要启动 API：
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements-api.txt
+.venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8643
+# 打开 http://127.0.0.1:8643
+```
+
 可选配置 `data/config.json`（模板见 `data/config.example.json`，已 gitignore）：
 - the-odds-api key → 启用盘口融合（免费档每月 500 次够整届用）
 - OpenAI 兼容接口 → 战报与单场看点自动生成（不配则人工/AI 会话执笔）
 - `gateway.models` + `arena.agents` → 接入任意多家模型开竞技场（GitHub OAuth 配好即可人机同赌）
+- API 站点配置也可走环境变量：`SITE_URL`、`SESSION_SECRET`、`ALLOWED_ORIGINS`、
+  `GITHUB_CLIENT_ID`、`GITHUB_CLIENT_SECRET`、`GITHUB_CALLBACK_URL`。
+  发布更新默认会阻止“已赛场次/模拟次数回退”的产物覆盖；确认要覆盖时加 `--force-publish`。
 
 ## 部署到你自己的服务器
 

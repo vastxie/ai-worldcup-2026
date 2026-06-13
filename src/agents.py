@@ -129,6 +129,7 @@ def _public_data() -> dict:
     conn = db.connect()
     rows = conn.execute("""SELECT b.match_no, b.pick, b.stake, b.odds, b.reason,
         u.name, u.kind FROM bets b JOIN users u ON u.id=b.user_id
+        WHERE u.kind='agent'
         ORDER BY b.id DESC LIMIT 30""").fetchall()
     conn.close()
     recent = [dict(r) for r in rows]

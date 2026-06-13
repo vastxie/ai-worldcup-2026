@@ -124,6 +124,9 @@ CREATE TABLE IF NOT EXISTS wallet_ledger (
   ts      TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_ledger_user ON wallet_ledger(user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_ledger_reason_ref
+ON wallet_ledger(reason, ref_id)
+WHERE ref_id IS NOT NULL AND reason IN ('bet', 'payout');
 
 -- ============ 竞技场：Agent 私有/公共内容 ============
 CREATE TABLE IF NOT EXISTS agent_notes (    -- 私有笔记，仅本 agent 可见
@@ -460,20 +463,22 @@ def get_user(user_id: int) -> dict | None:
 def place_bet(user_id: int, match_no: int, pick: str, stake: int,
               odds: float, reason: str | None = None) -> dict:
     """事务下注：校验余额、扣款、记账。调用方负责开球时间与赔率校验。"""
+    if stake <= 0:
+        raise ValueError("注额必须为正")
     with transaction() as conn:
-        user = conn.execute("SELECT * FROM users WHERE id=?",
-                            (user_id,)).fetchone()
-        if not user:
-            raise ValueError("用户不存在")
-        if user["balance"] < stake:
-            raise ValueError("余额不足")
+        # 余额检查和扣款必须是一条条件写入，避免并发下注用同一份旧余额过检。
+        cur = conn.execute("""UPDATE users SET balance = balance - ?
+                              WHERE id=? AND balance >= ?""",
+                           (stake, user_id, stake))
+        if cur.rowcount != 1:
+            exists = conn.execute("SELECT 1 FROM users WHERE id=?",
+                                  (user_id,)).fetchone()
+            raise ValueError("余额不足" if exists else "用户不存在")
         cur = conn.execute("""INSERT INTO bets
             (user_id, match_no, pick, stake, odds, placed_at, reason)
             VALUES (?,?,?,?,?,?,?)""",
             (user_id, match_no, pick, stake, odds, now(), reason))
         bet_id = cur.lastrowid
-        conn.execute("UPDATE users SET balance = balance - ? WHERE id=?",
-                     (stake, user_id))
         conn.execute("""INSERT INTO wallet_ledger
                         (user_id, delta, reason, ref_id, ts)
                         VALUES (?,?,?,?,?)""",
@@ -495,9 +500,11 @@ def settle_finished_bets() -> int:
             outcome = ("H" if b["score_home"] > b["score_away"]
                        else "A" if b["score_away"] > b["score_home"] else "D")
             payout = round(b["stake"] * b["odds"]) if b["pick"] == outcome else 0
-            conn.execute("""UPDATE bets SET settled=1, payout=?, settled_at=?
-                            WHERE id=? AND settled=0""",
-                         (payout, now(), b["id"]))
+            cur = conn.execute("""UPDATE bets SET settled=1, payout=?, settled_at=?
+                                  WHERE id=? AND settled=0""",
+                               (payout, now(), b["id"]))
+            if cur.rowcount != 1:
+                continue
             if payout:
                 conn.execute("UPDATE users SET balance = balance + ? "
                              "WHERE id=?", (payout, b["user_id"]))
@@ -535,14 +542,18 @@ def leaderboard(limit: int = 100) -> list[dict]:
     return out
 
 
-def match_bets(match_no: int) -> list[dict]:
+def match_bets(match_no: int, agents_only: bool = False) -> list[dict]:
     conn = connect()
+    where = "WHERE b.match_no=?"
+    params: tuple = (match_no,)
+    if agents_only:
+        where += " AND u.kind='agent'"
     rows = conn.execute("""
         SELECT b.id, b.pick, b.stake, b.odds, b.settled, b.payout, b.placed_at,
                b.reason,
                u.id AS user_id, u.kind, u.login, u.name, u.avatar_url, u.model
         FROM bets b JOIN users u ON u.id = b.user_id
-        WHERE b.match_no=? ORDER BY b.placed_at""", (match_no,)).fetchall()
+        """ + where + " ORDER BY b.placed_at", params).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 

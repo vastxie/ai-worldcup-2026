@@ -1,4 +1,6 @@
 {
+ "site_url": "https://你的域名",
+ "allowed_origins": ["https://你的域名"],
  "odds_api_key": "在 the-odds-api.com 免费注册获取（可选；不配置则纯模型运行，不融合盘口）",
  "llm": {
   "base_url": "https://你的OpenAI兼容接口/v1（可选；不配置则战报由人工撰写）",

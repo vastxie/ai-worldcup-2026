@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from . import db
+from .utils import atomic_write_text
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -132,14 +133,16 @@ def _build_digest(payload: dict) -> dict:
 def _publish() -> None:
     """把存档同步到网站（无论本次是否新生成）。"""
     reports = db.load_reports()
-    (ROOT / "web" / "reports.js").write_text(
+    atomic_write_text(
+        ROOT / "web" / "reports.js",
         "window.WC_REPORTS = " + json.dumps(reports[-60:], ensure_ascii=False)
-        + ";\n", encoding="utf-8")
+        + ";\n")
     blurbs = db.load_blurbs()
-    (ROOT / "web" / "blurbs.js").write_text(
+    atomic_write_text(
+        ROOT / "web" / "blurbs.js",
         "window.WC_BLURBS = " + json.dumps(
             {k: v["text"] for k, v in blurbs.items()}, ensure_ascii=False)
-        + ";\n", encoding="utf-8")
+        + ";\n")
 
 
 def maybe_generate_report(payload: dict) -> None:
