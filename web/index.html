@@ -386,7 +386,10 @@
   .mdetail { display: none; margin: -4px 0 12px; padding: 20px;
     border: 1px solid var(--line); border-top: 1px dashed var(--line);
     border-radius: 0 0 4px 4px; background: rgba(7,16,11,.65); }
-  .mdetail.open { display: grid; grid-template-columns: minmax(230px, 300px) 1fr; gap: 28px; }
+  .mdetail.open { display: block; }
+  .md-cols { display: grid; grid-template-columns: minmax(230px, 300px) 1fr; gap: 28px; }
+  .mdetail > .my-bets, .mdetail > .bet-box, .mdetail > .match-rc,
+  .mdetail > .bet-closed { margin-top: 20px; }
   .md-title { font-family: var(--mono); font-size: 11px; letter-spacing: .18em;
     color: var(--faint); margin-bottom: 10px; }
   .heat { display: grid; grid-template-columns: auto repeat(6, 1fr); gap: 3px;
@@ -709,7 +712,7 @@
     .m-when br { display: none; }
     .m-when .stage-badge { margin-top: 0; }
     .m-pred { border-top: 1px dashed var(--line); padding-top: 8px; }
-    .mdetail.open { grid-template-columns: 1fr; gap: 20px; }
+    .md-cols { grid-template-columns: 1fr; gap: 20px; }
     .fmatch { grid-template-columns: 1fr 50px 1fr; }
     .fmatch .fp { grid-column: 1 / -1; text-align: left; }
     .year-bg { right: -20px; }
@@ -1247,7 +1250,7 @@
         <span class="${m.score_hit ? "ok" : "miss"}">${m.score_hit ? "★ 比分完全命中" : "比分未完全命中"}</span></div>`;
     }
     right += `</div>`;
-    return heat + right;
+    return `<div class="md-cols">${heat}${right}</div>`;
   }
   function attachDetailToggle(containerId) {
     const el = document.getElementById(containerId);
@@ -1913,7 +1916,7 @@
           : `<span class="pend">可得 ${Math.round(b.stake * b.odds)}</span>`;
         return `<button class="mb-chip" data-i="${i}">${esc(names[b.pick] || b.pick)} · ${b.stake} @ ${Number(b.odds).toFixed(2)} · ${res}</button>`;
       }).join("");
-      det.lastElementChild.appendChild(box);
+      det.appendChild(box);
       box.querySelectorAll(".mb-chip").forEach(ch =>
         ch.addEventListener("click", e => {
           e.stopPropagation();
@@ -1935,7 +1938,7 @@
         return h ? `${h} 小时 ${mn} 分` : `${mn} 分钟`;
       };
       if (closed()) {
-        det.lastElementChild.insertAdjacentHTML("beforeend",
+        det.insertAdjacentHTML("beforeend",
           '<div class="bet-closed">已开球 · 下注通道关闭，完赛后自动结算</div>');
         return;
       }
@@ -1950,7 +1953,7 @@
           ${[100, 500, 1000].map(v => `<button class="stake-quick" data-v="${v}">${v}</button>`).join("")}
           <button class="bet-submit">${S.me ? "下注" : "登录后下注"}</button>
         </div><div class="bet-msg"></div>`;
-      det.lastElementChild.appendChild(box);
+      det.appendChild(box);
       const tick = setInterval(() => {
         if (!document.body.contains(box)) { clearInterval(tick); return; }
         if (closed()) {
@@ -2011,7 +2014,7 @@
       const box = document.createElement("div");
       box.className = "match-rc";
       box.innerHTML = '<div class="md-title" style="margin-top:18px">AI 圆桌 · 这场</div>';
-      det.lastElementChild.appendChild(box);
+      det.appendChild(box);
       api(`/api/posts/match/${m.match}`).then(posts => {
         const title = `<div class="md-title" style="margin-top:18px">AI 圆桌 · 这场${posts.length ? " · " + posts.length + " 条" : ""}</div>`;
         if (!posts.length) {
