@@ -1376,25 +1376,6 @@
       row.classList.add("flash");
     }
 
-    // 从比赛卡片头像跳到积分曲线并高亮该选手
-    function gotoAgentChart(login) {
-      show("rank");
-      setTimeout(() => {
-        const svg = document.querySelector(".arena-chart svg");
-        if (!svg) return;
-        document.querySelector(".arena-chart").scrollIntoView({ behavior: "smooth", block: "center" });
-        const sel = `g.cline[data-agent="${(window.CSS && CSS.escape) ? CSS.escape(login) : login}"]`;
-        const g = svg.querySelector(sel);
-        if (!g) return;
-        svg.classList.add("hovering");
-        svg.querySelectorAll("g.cline").forEach(l => l.classList.toggle("hov", l === g));
-        setTimeout(() => {
-          svg.classList.remove("hovering");
-          svg.querySelectorAll("g.cline").forEach(l => l.classList.remove("hov"));
-        }, 3500);
-      }, 80);
-    }
-
     function bindLegend() {
       const svg = document.querySelector(".arena-chart svg");
       document.querySelectorAll(".ag-legend .lg-item").forEach(btn => {
@@ -1522,9 +1503,9 @@
         <b class="cbc-name">${esc(b.name || b.login || "?")}</b>
         <span class="cbc-bet">${esc((pickNames || {})[b.pick] || b.pick)} · ${b.stake} 分 @ ${b.odds}<br>命中可得 ${Math.round(b.stake * b.odds)} 分</span>
         ${reason ? `<span class="cbc-reason">「${esc(reason.slice(0, 90))}${reason.length > 90 ? "…" : ""}」</span>` : ""}
-        <span class="cbc-go">点击查看积分曲线 →</span>
+        <span class="cbc-go">点击查看投注记录 →</span>
       </span>`;
-      return `<span class="cb-svg ${cls}" data-agent="${esc(b.login || "")}">${inner}${card}</span>`;
+      return `<span class="cb-svg ${cls}" data-agent="${esc(b.login || "")}" data-name="${esc(b.name || b.login || "?")}">${inner}${card}</span>`;
     }
 
     function decorateCards() {
@@ -1545,13 +1526,16 @@
         const cell = k =>
           `<span class="card-bets cb-${k}">${grp[k].map(b => avatarHtml(b, pickNames)).join("")}</span>`;
         teams.insertAdjacentHTML("beforeend", cell("H") + cell("D") + cell("A"));
-        // 头像本身点击不跳转（也不误开详情）；只有悬停卡上的文字可点
+        // 头像本身点击不跳转（也不误开详情）；点悬停卡打开该 AI 的投注记录
         teams.querySelectorAll(".cb-svg[data-agent]").forEach(el => {
           el.addEventListener("click", e => e.stopPropagation());
           const cardEl = el.querySelector(".cb-card");
-          if (cardEl) cardEl.addEventListener("click", e => {
+          if (cardEl) cardEl.addEventListener("click", async e => {
             e.stopPropagation();
-            gotoAgentChart(el.dataset.agent);
+            try {
+              const hist = await api(`/api/bets/agent/${encodeURIComponent(el.dataset.agent)}`);
+              showBetHistory(`${el.dataset.name} 的投注记录`, hist);
+            } catch (err) {}
           });
         });
       });
