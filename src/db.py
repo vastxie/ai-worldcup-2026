@@ -74,10 +74,11 @@ CREATE TABLE IF NOT EXISTS blurbs (
   text     TEXT, ts TEXT
 );
 
-CREATE TABLE IF NOT EXISTS champ_history (  -- 夺冠概率每日快照（走势图）
+CREATE TABLE IF NOT EXISTS champ_history (  -- 每日快照（走势图 + 本轮影响面板）
   date    TEXT PRIMARY KEY,
   played  INTEGER, sims INTEGER,
-  champion_json TEXT
+  champion_json TEXT,                        -- Top12 夺冠概率（走势图）
+  advance_json  TEXT                         -- 全队出线（晋级32强）概率（本轮影响面板）
 );
 
 CREATE TABLE IF NOT EXISTS odds_snapshots ( -- 盘口快照存档（审计）
@@ -193,6 +194,10 @@ def init_db(conn: sqlite3.Connection | None = None) -> None:
         pass
     try:  # 增量迁移：评论可挂在某场比赛下
         conn.execute("ALTER TABLE agent_posts ADD COLUMN match_no INTEGER")
+    except sqlite3.OperationalError:
+        pass
+    try:  # 增量迁移：走势快照存出线概率（本轮影响面板）
+        conn.execute("ALTER TABLE champ_history ADD COLUMN advance_json TEXT")
     except sqlite3.OperationalError:
         pass
     for col in ("we_base REAL", "fable_delta REAL", "fable_note TEXT"):
@@ -400,14 +405,20 @@ def load_champ_history() -> list[dict]:
     rows = conn.execute("SELECT * FROM champ_history ORDER BY date").fetchall()
     conn.close()
     return [{"date": r["date"], "played": r["played"], "sims": r["sims"],
-             "champion": json.loads(r["champion_json"])} for r in rows]
+             "champion": json.loads(r["champion_json"]),
+             "advance": (json.loads(r["advance_json"])
+                         if "advance_json" in r.keys() and r["advance_json"]
+                         else {})} for r in rows]
 
 
-def save_champ_snapshot(date: str, played: int, sims: int, champion: dict) -> None:
+def save_champ_snapshot(date: str, played: int, sims: int, champion: dict,
+                        advance: dict | None = None) -> None:
     with transaction() as conn:
         conn.execute("""INSERT OR REPLACE INTO champ_history
-                        (date, played, sims, champion_json) VALUES (?,?,?,?)""",
-                     (date, played, sims, json.dumps(champion)))
+                        (date, played, sims, champion_json, advance_json)
+                        VALUES (?,?,?,?,?)""",
+                     (date, played, sims, json.dumps(champion),
+                      json.dumps(advance or {})))
 
 
 def log_elo_change(match_no: int, changes: list[tuple]) -> None:

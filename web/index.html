@@ -177,6 +177,32 @@
   .tl-item { display: flex; align-items: center; gap: 7px; font-family: var(--mono); font-size: 12px; color: var(--dim); }
   .tl-dot { width: 10px; height: 10px; border-radius: 2px; }
   .trend-empty { color: var(--faint); font-size: 13px; font-family: var(--mono); padding: 30px 0; text-align: center; }
+  .trend-moves { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
+  .tm-summary { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+  .tm-label { font-family: var(--mono); font-size: 11px; letter-spacing: .16em; color: var(--faint); margin-right: 2px; }
+  .tm-pill { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 12px;
+    border: 1px solid var(--line); border-radius: 3px; padding: 5px 9px; background: rgba(7,16,11,.38); }
+  .tm-pill.up { color: var(--lime); border-color: rgba(184,245,61,.24); }
+  .tm-pill.down { color: var(--hot); border-color: rgba(255,122,82,.26); }
+  .tm-toggle { margin-left: auto; font-family: var(--mono); font-size: 11px; letter-spacing: .12em;
+    color: var(--dim); background: none; border: 1px solid var(--line); border-radius: 3px;
+    padding: 5px 10px; cursor: pointer; }
+  .tm-toggle:hover { color: var(--lime); border-color: var(--line-strong); background: rgba(184,245,61,.05); }
+  .tm-panel { display: none; margin-top: 12px; }
+  .tm-panel.open { display: block; }
+  .tm-meta { font-family: var(--mono); font-size: 11px; color: var(--faint); margin-bottom: 8px; }
+  .tm-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .mi-card { border: 1px solid var(--line); border-radius: 3px; padding: 10px 12px; background: rgba(7,16,11,.32); }
+  .mi-head { font-weight: 700; font-size: 13px; color: var(--ink);
+    padding-bottom: 8px; margin-bottom: 6px; border-bottom: 1px solid var(--line); }
+  .mi-head b { font-family: var(--mono); color: var(--lime); margin: 0 5px; }
+  .mi-side { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 4px 0; }
+  .mi-team { display: flex; align-items: center; gap: 7px; min-width: 0; font-weight: 600; font-size: 13px; }
+  .mi-team span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mi-figs { display: flex; flex-wrap: wrap; gap: 3px 10px; justify-content: flex-end; }
+  .mi-fig { font-family: var(--mono); font-size: 11.5px; color: var(--faint); white-space: nowrap; }
+  .mi-fig.up { color: var(--lime); }
+  .mi-fig.down { color: var(--hot); }
 
   /* ---- 赛程 ---- */
   .filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 24px; }
@@ -639,6 +665,7 @@
     .podium { grid-template-columns: 1fr; }
     .row { grid-template-columns: 32px 145px 1fr 70px; padding: 11px 12px; }
     .funnel { grid-template-columns: repeat(3, 1fr); padding-left: 12px; }
+    .tm-list { grid-template-columns: 1fr; }
     .mcard { grid-template-columns: 1fr; gap: 10px; }
     .m-when { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; }
     .m-when br { display: none; }
@@ -657,6 +684,8 @@
     .kicker { font-size: 10px; letter-spacing: .2em; }
     .sub { font-size: 13px; }
     .chip { font-size: 11px; padding: 6px 10px; }
+    .tm-toggle { margin-left: 0; }
+    .tm-pill { font-size: 11px; }
     .year-bg { font-size: 110px; top: -4px; right: -12px; }
     .podium-pct { font-size: 42px; }
     .row { grid-template-columns: 22px 108px 1fr 54px; gap: 7px; }
@@ -961,9 +990,71 @@
       svg += `<text x="${last[0] + 8}" y="${last[1] + 4}" font-size="11" fill="${col}" font-family="IBM Plex Mono">${pct(latest[c] || 0, 0)}</text>`;
     });
     svg += "</svg>";
+    // 本轮战报影响：聚焦本轮真正踢过的比赛，展示双方出线/夺冠概率的实际变化
+    function matchImpact() {
+      if (hist.length < 2) return "";
+      const prev = hist[hist.length - 2], cur = hist[hist.length - 1];
+      const newN = Math.max(0, (cur.played || 0) - (prev.played || 0));
+      const recent = (D.record && D.record.list ? D.record.list : []).slice(0, newN);
+      if (!recent.length) return "";  // 本轮没有新赛果，不显示
+      const pAdv = prev.advance || {}, cAdv = cur.advance || {};
+      const pCh = prev.champion || {}, cCh = cur.champion || {};
+      const hasAdv = Object.keys(cAdv).length > 0 && Object.keys(pAdv).length > 0;
+      const fmtD = d => `${d > 0 ? "+" : ""}${(d * 100).toFixed(1)}pp`;
+      const sideRow = code => {
+        const advD = (cAdv[code] || 0) - (pAdv[code] || 0);
+        const chD = (cCh[code] != null && pCh[code] != null) ? cCh[code] - pCh[code] : null;
+        const dir = advD > 0.0005 ? "up" : advD < -0.0005 ? "down" : "";
+        const figs = [];
+        if (hasAdv) figs.push(`<span class="mi-fig ${dir}">出线 ${pct(cAdv[code] || 0, 0)} (${fmtD(advD)})</span>`);
+        if (chD != null) figs.push(`<span class="mi-fig">夺冠 ${fmtD(chD)}</span>`);
+        const figsHtml = figs.length ? figs.join("") : '<span class="mi-fig">概率基本未动</span>';
+        return `<div class="mi-side">
+          <span class="mi-team"><span>${FLAG[code] || ""}</span><span>${esc(zh(code))}</span></span>
+          <span class="mi-figs">${figsHtml}</span>
+        </div>`;
+      };
+      // 摘要 pill：本轮出线概率涨/跌最大的队
+      const ranked = recent.flatMap(r => [r.home, r.away])
+        .map(c => ({ code: c, d: (cAdv[c] || 0) - (pAdv[c] || 0) }))
+        .sort((a, b) => b.d - a.d);
+      const top = ranked[0], bot = ranked[ranked.length - 1];
+      const pills = hasAdv && top && bot && top.code !== bot.code ? [
+        top.d > 0.0005 && `<span class="tm-pill up">↑ ${FLAG[top.code] || ""} ${esc(zh(top.code))} 出线 ${fmtD(top.d)}</span>`,
+        bot.d < -0.0005 && `<span class="tm-pill down">↓ ${FLAG[bot.code] || ""} ${esc(zh(bot.code))} 出线 ${fmtD(bot.d)}</span>`,
+      ].filter(Boolean).join("") : "";
+      const cards = recent.map(r => {
+        const sc = r.score ? `${r.score[0]} : ${r.score[1]}` : "";
+        return `<div class="mi-card">
+          <div class="mi-head">${FLAG[r.home] || ""} ${esc(zh(r.home))} <b>${sc}</b> ${esc(zh(r.away))} ${FLAG[r.away] || ""}</div>
+          ${sideRow(r.home)}${sideRow(r.away)}
+        </div>`;
+      }).join("");
+      const baselineNote = hasAdv ? "" : " · 出线概率基线刚建立，下次更新起显示变化";
+      return `<div class="trend-moves">
+        <div class="tm-summary">
+          <span class="tm-label">本轮战报</span>${pills}
+          <button class="tm-toggle" type="button" aria-expanded="false">逐场看影响 ↓</button>
+        </div>
+        <div class="tm-panel">
+          <div class="tm-meta">${esc((prev.date || "").slice(5))} → ${esc((cur.date || "").slice(5))} · 本轮 ${recent.length} 场赛果如何改写出线形势${baselineNote}</div>
+          <div class="tm-list">${cards}</div>
+        </div>
+      </div>`;
+    }
     box.innerHTML = `<div class="trend-legend">${codes.map((c, ci) =>
       `<span class="tl-item"><span class="tl-dot" style="background:${COLORS[ci]}"></span>${FLAG[c] || ""} ${zh(c)}</span>`).join("")}</div>` + svg
-      + (hist.length === 1 ? '<div class="trend-empty">首日快照 — 每次更新后这里会长出折线</div>' : "");
+      + (hist.length === 1 ? '<div class="trend-empty">首日快照 — 每次更新后这里会长出折线</div>' : matchImpact());
+    const moveToggle = box.querySelector(".tm-toggle");
+    const movePanel = box.querySelector(".tm-panel");
+    if (moveToggle && movePanel) {
+      moveToggle.addEventListener("click", () => {
+        const open = !movePanel.classList.contains("open");
+        movePanel.classList.toggle("open", open);
+        moveToggle.setAttribute("aria-expanded", String(open));
+        moveToggle.textContent = open ? "收起详情 ↑" : "查看详情 ↓";
+      });
+    }
   })();
 
   /* ===== 总览：决赛对阵 ===== */

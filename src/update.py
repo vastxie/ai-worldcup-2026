@@ -237,7 +237,9 @@ def build_schedule(state: dict) -> list[dict]:
 def update_history(sim_out: dict, played: int, sims: int) -> list[dict]:
     today = time.strftime("%Y-%m-%d")
     champion = {t["code"]: t["p_champion"] for t in sim_out["teams"][:12]}
-    db.save_champ_snapshot(today, played, sims, champion)
+    # 出线（晋级32强）概率存全队——本轮影响面板要查本轮参赛队，未必在夺冠 Top12
+    advance = {t["code"]: round(t.get("p_r32", 0), 4) for t in sim_out["teams"]}
+    db.save_champ_snapshot(today, played, sims, champion, advance)
     return db.load_champ_history()
 
 
