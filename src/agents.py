@@ -112,9 +112,9 @@ def _public_data() -> dict:
                     "D": round(1 / max(p["p_draw"], 0.02), 2),
                     "A": round(1 / max(p["p_away"], 0.02), 2)},
             "市场盘口": p.get("market"),
-            # Fable 微调透明公示：选手可选择跟随或反向
-            "Fable微调": (f"{p['fable']['delta']:+g}百分点(主队向)·{p['fable']['note']}"
-                         if p.get("fable") else None),
+            # Claude Code 微调透明公示：选手可选择跟随或反向
+            "Claude Code微调": (f"{p['fable']['delta']:+g}百分点(主队向)·{p['fable']['note']}"
+                               if p.get("fable") else None),
             "看点": None,
         })
     blurbs = db.load_blurbs()

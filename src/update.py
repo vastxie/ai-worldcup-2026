@@ -290,7 +290,7 @@ def print_report(payload: dict, published: bool = True) -> None:
         fable_note = ""
         if stats.get("n_adjusted"):
             fable_note = (f" | 纯引擎 Brier {stats['brier_base']:.3f}"
-                          f"（Fable 微调 {stats['n_adjusted']} 场）")
+                          f"（Claude Code 微调 {stats['n_adjusted']} 场）")
         print(f"  预测战绩: 胜平负命中 {stats['outcome_acc'] * 100:.0f}%"
               f" | 精确比分命中 {stats['score_acc'] * 100:.0f}%"
               f" | Brier {stats['brier']:.3f}  (共 {stats['n']} 场)"

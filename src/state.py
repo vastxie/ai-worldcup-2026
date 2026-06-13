@@ -58,7 +58,7 @@ def build_state() -> dict:
     records = []           # 已赛比赛的事前预测 vs 实际
     n_outcome_hit = n_score_hit = 0
     brier_sum = 0.0
-    brier_base_sum = 0.0   # 反事实基线：若无 Fable 微调，纯引擎+市场的误差
+    brier_base_sum = 0.0   # 反事实基线：若无主观微调，纯引擎+市场的误差
     n_adjusted = 0
 
     for m in played:
@@ -79,7 +79,7 @@ def build_state() -> dict:
         brier_sum += sum((probs[o] - (1.0 if o == actual else 0.0)) ** 2
                          for o in "HDA")
 
-        # Fable 微调过的场次：再按反事实基线计一遍误差，量化主观判断的增益
+        # 主观微调过的场次：再按反事实基线计一遍误差，量化判断增益
         fable = lk.get("fable") if lk else None
         base = None
         if fable and lk.get("we_base") is not None:
@@ -157,7 +157,7 @@ def build_state() -> dict:
         if mkt or fa:
             home, away = by_code[m["home"]], by_code[m["away"]]
             we_model = win_expectancy(effective_elo(home), effective_elo(away))
-            # Fable 主观微调：情报驱动的有界扰动——先调引擎，再融市场，
+            # Claude Code 主观微调：情报驱动的有界扰动——先调引擎，再融市场，
             # 市场权重天然制衡；无微调的基线值同存，赛后双线对账
             we_adj = (min(max(we_model + fa["delta"] / 100.0, 0.05), 0.95)
                       if fa else we_model)

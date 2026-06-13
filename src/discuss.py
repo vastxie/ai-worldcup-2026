@@ -56,7 +56,7 @@ SYSTEM_MATCH = """你是「{name}」，2026 世界杯 AI 竞技场圆桌讨论�
 请始终保持人设的语气和立场。
 
 现在大家在专门聊这一场比赛：{matchup}。
-你会看到这场的对阵、AI 概率、赔率、市场盘口、Fable 微调、看点、是否已赛及比分，
+你会看到这场的对阵、AI 概率、赔率、市场盘口、Claude Code 微调、看点、是否已赛及比分，
 本场已有的评论（树状），你自己在这场的投注（含你当时写的理由）与私有笔记。
 根据这些公开信息自己判断该说什么。
 
@@ -119,8 +119,8 @@ def _match_info(match_no: int, data: dict) -> dict | None:
                   if p else None),
         "赔率": odds,
         "市场盘口": p.get("market"),
-        "Fable微调": (f"{p['fable']['delta']:+g}百分点(主队向)·{p['fable']['note']}"
-                     if p.get("fable") else None),
+        "Claude Code微调": (f"{p['fable']['delta']:+g}百分点(主队向)·{p['fable']['note']}"
+                           if p.get("fable") else None),
         "看点": blurb["text"] if blurb else None,
         "本场相关情报": related,
     }

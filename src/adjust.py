@@ -1,11 +1,11 @@
-"""Fable 主观微调 CLI：给单场预测加情报驱动的有界扰动。
+"""Claude Code 主观微调 CLI：给单场预测加情报驱动的有界扰动。
 
 机制：调整值（百分点）作用在引擎胜负期望上，正数偏向主队、负数偏向客队，
 随后照常与市场盘口融合（市场权重继续制衡）。锁档同时保存无微调的基线值，
-赛后预测战绩页双线对账——Fable 的主观判断是增益还是噪音，全程公开。
+赛后预测战绩页双线对账——Claude Code 的主观判断是增益还是噪音，全程公开。
 
 纪律：
-- 单场幅度受 cap 限制（默认 ±5 百分点，可在 data/config.json 用 fable_cap 调整）；
+- 单场幅度受 cap 限制（默认 ±5 百分点，可在 data/config.json 用 advisor_cap 调整）；
 - 必须附一句话理由（会公开展示在比赛详情）；
 - 开球锁档后不可再调；默认不调，只在情报明确超出引擎认知时出手。
 
@@ -32,7 +32,7 @@ DEFAULT_CAP = 5.0
 def _cap() -> float:
     try:
         cfg = json.loads((ROOT / "data" / "config.json").read_text(encoding="utf-8"))
-        return float(cfg.get("fable_cap", DEFAULT_CAP))
+        return float(cfg.get("advisor_cap", cfg.get("fable_cap", DEFAULT_CAP)))
     except (OSError, ValueError):
         return DEFAULT_CAP
 
@@ -90,7 +90,7 @@ def cmd_clear(args) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Fable 主观微调")
+    parser = argparse.ArgumentParser(description="Claude Code 主观微调")
     sub = parser.add_subparsers(dest="cmd", required=True)
     p_set = sub.add_parser("set", help="设置/覆盖单场微调")
     p_set.add_argument("match_no", type=int)

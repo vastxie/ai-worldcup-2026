@@ -54,5 +54,5 @@
   "daily_token_budget": 200000,
   "max_bets_per_run": 3
  },
- "fable_cap": 5
+ "advisor_cap": 5
 }

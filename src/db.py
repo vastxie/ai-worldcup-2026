@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS locks (    -- 赛前锁档（开球后只读）
   ts       TEXT
 );
 
-CREATE TABLE IF NOT EXISTS fable_adjust (  -- Fable 主观微调（情报驱动的有界扰动）
+CREATE TABLE IF NOT EXISTS fable_adjust (  -- 主观微调（情报驱动的有界扰动，历史表名保留兼容）
   match_no INTEGER PRIMARY KEY,
   delta    REAL NOT NULL,             -- 主队胜负期望调整，百分点（±cap 以内）
   note     TEXT NOT NULL,             -- 一句话理由，公开展示
@@ -201,7 +201,7 @@ def init_db(conn: sqlite3.Connection | None = None) -> None:
     except sqlite3.OperationalError:
         pass
     for col in ("we_base REAL", "fable_delta REAL", "fable_note TEXT"):
-        try:  # 增量迁移：锁档存反事实基线（无 Fable 微调的纯引擎+市场值）
+        try:  # 增量迁移：锁档存反事实基线（无主观微调的纯引擎+市场值）
             conn.execute(f"ALTER TABLE locks ADD COLUMN {col}")
         except sqlite3.OperationalError:
             pass
@@ -339,7 +339,7 @@ def save_lock(match_no: int, we: float, market: dict | None,
               fable and fable.get("delta"), fable and fable.get("note")))
 
 
-# ------------------------------------------------------- Fable 主观微调 --
+# ------------------------------------------------------- 主观微调 --
 
 def fable_adjust_set(match_no: int, delta: float, note: str) -> None:
     with transaction() as conn:
@@ -441,6 +441,25 @@ def snapshot_odds(kind: str, payload: dict) -> None:
 # ------------------------------------------------------------ users/bets --
 
 INIT_BALANCE = 1000
+PUBLIC_ADVISOR_NAME = "Claude Code"
+PUBLIC_ADVISOR_MODEL = "claude-code"
+PUBLIC_ADVISOR_STYLE = "赛事情报审稿员，把临场消息折成克制的概率修正。"
+
+
+def _is_legacy_advisor(login: str | None = None, name: str | None = None,
+                       model: str | None = None) -> bool:
+    sig = " ".join(str(x or "").lower() for x in (login, name, model))
+    return "fable" in sig
+
+
+def _public_agent_row(row: dict) -> dict:
+    if not _is_legacy_advisor(row.get("login"), row.get("name"),
+                              row.get("model")):
+        return row
+    row["name"] = PUBLIC_ADVISOR_NAME
+    row["model"] = PUBLIC_ADVISOR_MODEL
+    row["persona"] = row.get("persona") or PUBLIC_ADVISOR_STYLE
+    return row
 
 
 def get_or_create_github_user(github_id: int, login: str, name: str | None,
@@ -592,7 +611,7 @@ def leaderboard(limit: int = 100) -> list[dict]:
         d["net_worth"] = d["balance"] + d["in_play"]
         d["tags"] = (_strategy_tags_from_rows(bets_by_user.get(d["id"], []))
                      if d["kind"] == "agent" else [])
-        out.append(d)
+        out.append(_public_agent_row(d) if d["kind"] == "agent" else d)
     conn.close()
     return out
 
@@ -610,7 +629,8 @@ def match_bets(match_no: int, agents_only: bool = False) -> list[dict]:
         FROM bets b JOIN users u ON u.id = b.user_id
         """ + where + " ORDER BY b.placed_at", params).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    return [_public_agent_row(dict(r)) if r["kind"] == "agent" else dict(r)
+            for r in rows]
 
 
 # ------------------------------------------------------------- agents 专区 --
@@ -618,6 +638,9 @@ def match_bets(match_no: int, agents_only: bool = False) -> list[dict]:
 def ensure_agent_user(login: str, name: str, model: str,
                       persona: str) -> dict:
     """注册/更新 AI 选手（kind=agent），新选手发同额初始积分。"""
+    if _is_legacy_advisor(login, name, model):
+        name, model = PUBLIC_ADVISOR_NAME, PUBLIC_ADVISOR_MODEL
+        persona = persona or PUBLIC_ADVISOR_STYLE
     with transaction() as conn:
         row = conn.execute(
             "SELECT * FROM users WHERE kind='agent' AND login=?",
@@ -625,7 +648,8 @@ def ensure_agent_user(login: str, name: str, model: str,
         if row:
             conn.execute("UPDATE users SET name=?, model=?, persona=? "
                          "WHERE id=?", (name, model, persona, row["id"]))
-            return dict(row)
+            return dict(conn.execute("SELECT * FROM users WHERE id=?",
+                                     (row["id"],)).fetchone())
         cur = conn.execute("""INSERT INTO users
             (kind, login, name, model, persona, balance, created_at)
             VALUES ('agent',?,?,?,?,?,?)""",
@@ -720,7 +744,13 @@ def agent_posts(limit: int = 200, match_no: int | None = None,
         {where}
         ORDER BY p.id DESC LIMIT ?""", (*extra, limit)).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    out = []
+    for r in rows:
+        d = _public_agent_row(dict(r))
+        if _is_legacy_advisor(name=d.get("reply_to_name")):
+            d["reply_to_name"] = PUBLIC_ADVISOR_NAME
+        out.append(d)
+    return out
 
 
 def intel_add(title: str, content: str, source: str = "") -> int:

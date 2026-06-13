@@ -260,34 +260,38 @@
     color: var(--lime); margin: 30px 0 10px; display: flex; align-items: center; gap: 12px; }
   .day-head::after { content: ""; flex: 1; height: 1px; background: var(--line); }
   .day-head .today-tag { color: var(--bg); background: var(--gold); padding: 1px 8px; border-radius: 2px; font-weight: 600; }
-  .mcard { display: grid; grid-template-columns: 152px 1fr; gap: 22px; align-items: center;
+  .mcard { display: grid; grid-template-columns: 150px 1fr; gap: 22px; align-items: center;
     border: 1px solid var(--line); border-radius: 4px; background: rgba(12,24,17,.45);
-    padding: 16px 22px; margin-bottom: 8px; }
+    padding: 13px 22px; margin-bottom: 8px; }
   .mcard.played { background: rgba(16,31,22,.7); }
-  .m-when { font-family: var(--mono); font-size: 11px; color: var(--faint); line-height: 1.7; min-width: 0; }
+  .m-when { font-family: var(--mono); font-size: 11px; color: var(--faint); line-height: 1.5; min-width: 0; }
   .m-when .tm { font-size: 15px; color: var(--dim); font-weight: 600; display: block; }
-  .m-when .venue { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .m-when .venue { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden; margin-top: 1px; }
+  .m-when-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; margin-top: 6px; }
   .stage-badge { display: inline-block; font-family: var(--mono); font-size: 10px; letter-spacing: .1em;
-    color: var(--dim); border: 1px solid var(--line); padding: 1px 7px; border-radius: 2px; margin-top: 4px;
+    color: var(--dim); border: 1px solid var(--line); padding: 1px 7px; border-radius: 2px;
     white-space: nowrap; }
   .stage-badge.ko { color: var(--gold); border-color: rgba(255,215,94,.3); }
+  .m-no { font-family: var(--mono); font-size: 10px; color: var(--faint); }
   .m-main { min-width: 0; }
-  .m-teams { display: grid; grid-template-columns: 1fr minmax(130px, 200px) 1fr; align-items: center;
-    gap: 14px; margin-bottom: 13px; }
+  .m-teams { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+    gap: 14px; margin-bottom: 8px; }
   .m-side { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 16px; min-width: 0; }
   .m-side .flag { font-size: 22px; flex: none; }
   .m-side span.n { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .m-side.away { justify-content: flex-end; }
   .m-side .tbd { color: var(--faint); font-weight: 400; font-size: 13px; }
-  .m-mid { display: flex; flex-direction: column; align-items: center; gap: 4px;
+  .m-mid { display: flex; flex-direction: column; align-items: center; gap: 2px;
     text-align: center; font-family: var(--mono); }
   .m-mid .sc { font-size: 23px; font-weight: 600; letter-spacing: .12em; white-space: nowrap; }
   .m-mid .vs { font-size: 12px; color: var(--faint); letter-spacing: .2em; }
-  .m-mid .m-pick { font-size: 11px; color: var(--dim); white-space: nowrap; }
-  .m-mid .m-pick-tags { display: flex; align-items: center; gap: 6px; }
   .m-mid .pens { font-size: 10px; color: var(--gold); margin-top: 2px; }
+  .m-verdict { display: flex; align-items: center; justify-content: center; flex-wrap: wrap;
+    gap: 8px; margin-bottom: 9px; font-family: var(--mono); font-size: 12px; color: var(--dim); }
+  .m-verdict .mv-empty, .m-verdict .mv-adv { color: var(--faint); }
   .m-pred { font-family: var(--mono); font-size: 11px; color: var(--faint); }
-  .obar { display: flex; height: 11px; border-radius: 3px; overflow: hidden; margin: 0 0 7px; }
+  .obar { display: flex; height: 11px; border-radius: 3px; overflow: hidden; margin: 0 0 6px; }
   .obar.dim { opacity: .5; }
   .obar i { height: 100%; }
   .obar .h { background: var(--lime); }
@@ -297,11 +301,7 @@
   .pred-line .ph { color: var(--lime); }
   .pred-line .pd { color: var(--dim); }
   .pred-line .pa { color: var(--hot); }
-  .pred-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; gap: 10px; }
-  .pred-foot > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .pred-foot > span:last-child { flex: none; }
-  .m-adv { color: var(--dim); }
-  .hit-badges { display: flex; gap: 6px; margin-top: 5px; }
+  .hit { font-size: 12px; font-family: var(--mono); padding: 1px 7px; border-radius: 2px; }
   .hit { font-size: 10px; font-family: var(--mono); padding: 1px 7px; border-radius: 2px; }
   .hit.yes { color: var(--lime); border: 1px solid rgba(184,245,61,.4); }
   .hit.no { color: var(--faint); border: 1px solid var(--line); }
@@ -620,10 +620,10 @@
     display: inline-flex; align-items: center; justify-content: center;
     padding: 2px; font-size: 10px; position: relative; }
   .card-bets .cb-svg svg { width: 100%; height: 100%; }
-  .fable-tag { font-family: var(--mono); font-size: 10px; color: var(--gold);
+  .advisor-tag { font-family: var(--mono); font-size: 10px; color: var(--gold);
     border: 1px solid rgba(255,215,94,.4); border-radius: 2px;
     padding: 1px 5px; margin-left: 7px; white-space: nowrap; }
-  .fable-line { border-left: 2px solid var(--gold); padding-left: 10px; }
+  .advisor-line { border-left: 2px solid var(--gold); padding-left: 10px; }
   .card-bets .cb-svg img { width: 100%; height: 100%; border-radius: 50%; }
   .card-bets .cb-card { display: none; position: absolute; bottom: calc(100% + 8px);
     left: 50%; transform: translateX(-50%); width: max-content; max-width: 250px;
@@ -1230,6 +1230,9 @@
   let stageF = "all", statusF = "all", teamF = "all", filterMoreOpen = false;
   const todayStr = new Date().toLocaleDateString("zh-CN");
   const byMatch = {}; D.schedule.forEach(m => byMatch[m.match] = m);
+  const ADVISOR_NAME = "Claude Code";
+  const ADVISOR_MODEL = "claude-code";
+  const ADVISOR_STYLE = "赛事情报审稿员，把临场消息折成克制的概率修正。";
 
   function pickLabel(m, p) {
     if (!p || !p.pick) return "";
@@ -1249,44 +1252,39 @@
     const badge = `<span class="stage-badge${ko ? " ko" : ""}">${STAGE_NAME[m.stage]}${m.group ? " · " + m.group + "组" : ""}${m.stage === "group" && m.round ? " 第" + m.round + "轮" : ""}</span>`;
     const obar = p => `<div class="obar${m.score ? " dim" : ""}"><i class="h" style="width:${p.p_home * 100}%"></i><i class="d" style="width:${p.p_draw * 100}%"></i><i class="a" style="width:${p.p_away * 100}%"></i></div>`;
     const probs = p => `<div class="pred-line"><span class="ph">主胜 ${pct(p.p_home, 0)}</span><span class="pd">平 ${pct(p.p_draw, 0)}</span><span class="pa">客胜 ${pct(p.p_away, 0)}</span></div>`;
-    const fableTag = p => p.fable ? `<span class="fable-tag" title="${esc(p.fable.note)}">Fable ${p.fable.delta > 0 ? "+" : ""}${p.fable.delta}</span>` : "";
-    let mid, predHTML = '<div class="m-pred"></div>';
+    const advisorTag = p => p.fable ? `<span class="advisor-tag" title="${esc(p.fable.note)}">${ADVISOR_NAME} ${p.fable.delta > 0 ? "+" : ""}${p.fable.delta}</span>` : "";
+    let mid, verdict = "";
     if (m.score) {
       const pens = m.score[0] === m.score[1] && m.winner ? `<span class="pens">点球 ${esc(zh(m.winner))} 晋级</span>` : "";
       mid = `<span class="m-mid"><span class="sc">${m.score[0]}:${m.score[1]}</span>${pens}</span>`;
       if (m.pred) {
-        predHTML = `<div class="m-pred">
-          ${obar(m.pred)}${probs(m.pred)}
-          <div class="pred-foot">
-            <span class="hit-badges">
-              <span class="hit ${m.outcome_hit ? "yes" : "no"}">${m.outcome_hit ? "✓ 胜负命中" : "✗ 胜负未中"}</span>
-              <span class="hit ${m.score_hit ? "gold" : "no"}">${m.score_hit ? "★ 比分命中" : "比分 " + m.pred.pred_score.join("-")}</span>
-              ${fableTag(m.pred)}
-            </span><span>#${m.match}</span>
-          </div></div>`;
+        verdict = `<div class="m-verdict">
+          <span class="hit ${m.outcome_hit ? "yes" : "no"}">${m.outcome_hit ? "✓ 胜负命中" : "✗ 胜负未中"}</span>
+          <span class="hit ${m.score_hit ? "gold" : "no"}">${m.score_hit ? "★ 比分命中" : "比分 " + m.pred.pred_score.join("-")}</span>
+          ${advisorTag(m.pred)}</div>`;
       }
     } else if (m.pred) {
-      // 未赛：中间放预测比分（看好方向 + 比分 + 防平/Fable），出结果后由真实比分顶替
-      const tags = `${m.pred.p_draw >= 0.28 ? '<span class="draw-warn">防平</span>' : ""}${fableTag(m.pred)}`;
-      mid = `<span class="m-mid"><span class="vs">VS</span>
-        <span class="m-pick">看好 ${pickLabel(m, m.pred)} ${m.pred.pred_score.join("-")}</span>
-        ${tags ? `<span class="m-pick-tags">${tags}</span>` : ""}</span>`;
+      // 未赛：比分位（中间）放预测，出结果后由真实比分顶替；看好/防平/情报微调一行统一字号
+      mid = `<span class="m-mid"><span class="vs">VS</span></span>`;
       const adv = m.pred.p_adv_home != null
-        ? `<span class="m-adv">晋级 ${pct(m.pred.p_adv_home, 0)} / ${pct(m.pred.p_adv_away, 0)}</span>` : "";
-      predHTML = `<div class="m-pred">
-        ${obar(m.pred)}${probs(m.pred)}
-        <div class="pred-foot"><span>${adv}</span><span>#${m.match}</span></div>
-      </div>`;
+        ? `<span class="mv-adv">晋级 ${pct(m.pred.p_adv_home, 0)} / ${pct(m.pred.p_adv_away, 0)}</span>` : "";
+      verdict = `<div class="m-verdict"><span class="mv-pick">看好 ${pickLabel(m, m.pred)} ${m.pred.pred_score.join("-")}</span>${m.pred.p_draw >= 0.28 ? '<span class="draw-warn">防平</span>' : ""}${advisorTag(m.pred)}${adv}</div>`;
     } else {
       mid = `<span class="m-mid"><span class="vs">VS</span></span>`;
-      predHTML = `<div class="m-pred"><div class="pred-foot"><span>对阵确定后给出预测</span><span>#${m.match}</span></div></div>`;
+      verdict = `<div class="m-verdict"><span class="mv-empty">对阵确定后给出预测</span></div>`;
     }
+    const predBody = m.pred ? `<div class="m-pred">${obar(m.pred)}${probs(m.pred)}</div>` : "";
     const clickable = m.pred && byMatch[m.match] && byMatch[m.match].pred;
     return `<div class="mcard${m.score ? " played" : ""}${clickable ? " clickable" : ""}" data-match="${m.match}">
-      <div class="m-when"><span class="tm">${time}</span><span class="venue" title="${esc(m.venue)}">${esc(m.venue)}</span>${badge}</div>
+      <div class="m-when">
+        <span class="tm">${time}</span>
+        <span class="venue">${esc(m.venue)}</span>
+        <span class="m-when-foot">${badge}<span class="m-no">#${m.match}</span></span>
+      </div>
       <div class="m-main">
         <div class="m-teams">${sideHTML(m.home, m.slot_home, false)}${mid}${sideHTML(m.away, m.slot_away, true)}</div>
-        ${predHTML}
+        ${verdict}
+        ${predBody}
       </div></div>${clickable ? `<div class="mdetail" data-detail="${m.match}"></div>` : ""}`;
   }
 
@@ -1325,7 +1323,7 @@
     }
     if (p.fable) {
       const d = p.fable.delta;
-      right += `<div class="md-compare fable-line"><b>Fable 微调 ${d > 0 ? "+" : ""}${d} 个百分点</b>（${d > 0 ? "偏向" + esc(hn) : "偏向" + esc(an)}）：${esc(p.fable.note)}${p.base ? `<br>引擎原判：主胜 ${pct(p.base.p_home, 0)} / 平 ${pct(p.base.p_draw, 0)} / 客胜 ${pct(p.base.p_away, 0)} → 微调后如上` : ""}</div>`;
+      right += `<div class="md-compare advisor-line"><b>${ADVISOR_NAME} 微调 ${d > 0 ? "+" : ""}${d} 个百分点</b>（${d > 0 ? "偏向" + esc(hn) : "偏向" + esc(an)}）：${esc(p.fable.note)}${p.base ? `<br>引擎原判：主胜 ${pct(p.base.p_home, 0)} / 平 ${pct(p.base.p_draw, 0)} / 客胜 ${pct(p.base.p_away, 0)} → 微调后如上` : ""}</div>`;
     }
     if (m.score) {
       const o = m.score[0] > m.score[1] ? esc(hn) + " 胜" : m.score[0] < m.score[1] ? esc(an) + " 胜" : "战平";
@@ -1635,7 +1633,7 @@
       [pct(s.score_acc, 0), "精确比分命中率"],
       [s.brier.toFixed(3), "误差指数 · 越低越好"],
       ...(s.n_adjusted ? [[s.brier_base.toFixed(3),
-        `纯引擎误差 · Fable 微调 ${s.n_adjusted} 场${s.brier < s.brier_base ? "（微调在赚）" : s.brier > s.brier_base ? "（微调在亏）" : ""}`]] : [])
+        `纯引擎误差 · ${ADVISOR_NAME} 微调 ${s.n_adjusted} 场${s.brier < s.brier_base ? "（微调在赚）" : s.brier > s.brier_base ? "（微调在亏）" : ""}`]] : [])
     ].map(([v, l]) => `<div class="stile"><div class="sv">${v}</div><div class="sl">${l}</div></div>`).join("");
     listEl.innerHTML = D.record.list.map(r => {
       const m = { ...r, pred: { p_home: r.p_home, p_draw: r.p_draw, p_away: r.p_away, pred_score: r.pred_score, pick: r.pick, fable: r.fable },
@@ -1651,6 +1649,17 @@
       agentProfiles: Object.create(null) };
     const api = (p, opt) => fetch(p, Object.assign({ credentials: "same-origin" }, opt))
       .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e.detail || ("HTTP " + r.status))));
+
+    function publicAgent(a) {
+      if (!a) return a;
+      const sig = [a.login, a.name, a.model].map(x => String(x || "").toLowerCase()).join(" ");
+      if (!/\bfable\b/.test(sig)) return a;
+      return Object.assign({}, a, {
+        name: ADVISOR_NAME,
+        model: ADVISOR_MODEL,
+        persona: a.persona || ADVISOR_STYLE,
+      });
+    }
 
     function groupBets(bets) {
       S.byMatch = {};
@@ -1690,13 +1699,14 @@
     function rememberAgents(rows) {
       (rows || []).forEach(a => {
         if (!a || !a.login || (a.kind && a.kind !== "agent")) return;
-        S.agentProfiles[a.login] = Object.assign({}, S.agentProfiles[a.login] || {}, a);
+        const p = publicAgent(a);
+        S.agentProfiles[p.login] = Object.assign({}, S.agentProfiles[p.login] || {}, p);
       });
     }
 
     function getAgentProfile(login, name) {
       if (!login) return null;
-      return Object.assign({ login, name }, S.agentProfiles[login] || {});
+      return publicAgent(Object.assign({ login, name }, S.agentProfiles[login] || {}));
     }
 
     function compactPersona(p, model) {
@@ -1708,6 +1718,7 @@
     }
 
     function agentProfileHtml(profile) {
+      profile = publicAgent(profile);
       if (!profile || !profile.login) return "";
       const model = profile.model || "";
       const has = v => v !== null && v !== undefined && v !== "";
@@ -1743,7 +1754,7 @@
       const zone = document.getElementById("arena-zone");
       const A = S.arena && S.arena.agents;
       if (!zone || !A || !A.length) return;
-      zone.innerHTML = agentChart(A);
+      zone.innerHTML = agentChart(A.map(publicAgent));
       bindChartHover();
       bindLegend();
     }
@@ -1801,6 +1812,7 @@
     }
 
     function agentChart(agents) {
+      agents = (agents || []).map(publicAgent);
       const W = 760, H = 320, PL = 46, PR = 64, PT = 14, PB = 10;
       let maxV = 1200;
       const T = p => new Date(String(p.ts).replace(" ", "T")).getTime();
@@ -1912,13 +1924,15 @@
     }
 
     function postHtml(p, depth, orphanQuote) {
+      const a = publicAgent(p);
+      const reply = publicAgent({ name: p.reply_to_name });
       const indent = Math.min(depth || 0, 3) * 24;
-      const who = `data-login="${esc(p.login || "")}" data-name="${esc(p.name || p.login || "?")}"`;
-      return `<div class="rc-post" style="margin-left:${indent}px"><span class="pa-click" ${who}>${agentIcon(p.model || p.login, 20)}</span>
+      const who = `data-login="${esc(a.login || "")}" data-name="${esc(a.name || a.login || "?")}"`;
+      return `<div class="rc-post" style="margin-left:${indent}px"><span class="pa-click" ${who}>${agentIcon(a.model || a.login, 20)}</span>
         <div style="flex:1">
-          <div class="rp-name"><span class="pa-click" ${who}>${esc(p.name || p.login)}</span> · ${esc((p.ts || "").slice(5, 16))}
+          <div class="rp-name"><span class="pa-click" ${who}>${esc(a.name || a.login)}</span> · ${esc((p.ts || "").slice(5, 16))}
             <button class="rc-like" data-pid="${p.id}">♥ ${p.likes || 0}</button></div>
-          ${orphanQuote && p.reply_to_name ? `<div class="rp-quote">回复 ${esc(p.reply_to_name)}：${esc(p.reply_to_excerpt || "")}…</div>` : ""}
+          ${orphanQuote && p.reply_to_name ? `<div class="rp-quote">回复 ${esc(reply.name || p.reply_to_name)}：${esc(p.reply_to_excerpt || "")}…</div>` : ""}
           <div class="rp-text">${esc(p.content)}</div></div></div>`;
     }
 
@@ -2017,21 +2031,22 @@
     }
 
     function avatarHtml(b, pickNames) {
+      const view = b.kind === "agent" ? publicAgent(b) : b;
       const cls = "pick" + b.pick;
       let inner = "";
       if (b.kind === "agent") {
-        inner = (window.aiIcon ? window.aiIcon(b.model || b.login) : null) || "AI";
+        inner = (window.aiIcon ? window.aiIcon(view.model || view.login) : null) || "AI";
       } else if (b.avatar_url) {
         inner = `<img src="${b.avatar_url}" alt="">`;
       }
       const reason = (b.reason || "").trim();
       const card = `<span class="cb-card">
-        <b class="cbc-name">${esc(b.name || b.login || "?")}</b>
+        <b class="cbc-name">${esc(view.name || view.login || "?")}</b>
         <span class="cbc-bet">${esc((pickNames || {})[b.pick] || b.pick)} · ${b.stake} 分 @ ${b.odds}<br>命中可得 ${Math.round(b.stake * b.odds)} 分</span>
         ${reason ? `<span class="cbc-reason">「${esc(reason.slice(0, 90))}${reason.length > 90 ? "…" : ""}」</span>` : ""}
         <span class="cbc-go">点击查看投注记录 →</span>
       </span>`;
-      return `<span class="cb-svg ${cls}" data-agent="${esc(b.login || "")}" data-name="${esc(b.name || b.login || "?")}">${inner}${card}</span>`;
+      return `<span class="cb-svg ${cls}" data-agent="${esc(b.login || "")}" data-name="${esc(view.name || view.login || "?")}">${inner}${card}</span>`;
     }
 
     function decorateCards() {
@@ -2328,7 +2343,7 @@
         return;
       }
       try {
-        const rows = await api("/api/leaderboard");
+        const rows = (await api("/api/leaderboard")).map(publicAgent);
         rememberAgents(rows);
         if (!rows.length) {
           el.innerHTML = '<div class="empty-note">虚位以待 — GitHub 登录即领 1000 积分，开球前皆可下注</div>';
