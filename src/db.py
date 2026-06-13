@@ -720,15 +720,30 @@ def user_bets(user_id: int) -> list[dict]:
 
 
 def balance_timeline(user_id: int) -> list[dict]:
-    """积分余额随时间的累计曲线（折线图数据）。"""
+    """净资产随时间的曲线（折线图数据）。
+
+    净资产 = 可用余额 + 在投注额。下注只是把钱从可用挪到在投，净资产不变；
+    只有结算才真正涨跌（赢 +payout-stake，输 -stake）。因此曲线不会因为
+    下注就掉下去——这才是真实的身家走势。
+    """
     conn = connect()
-    rows = conn.execute("SELECT delta, ts FROM wallet_ledger WHERE user_id=? "
-                        "ORDER BY id", (user_id,)).fetchall()
+    # 初始发放与破产补助直接计入净资产基数（不含 bet/payout 流水，避免重复计）
+    base = conn.execute("SELECT delta, ts FROM wallet_ledger WHERE user_id=? "
+                        "AND reason IN ('init','bonus') ORDER BY id",
+                        (user_id,)).fetchall()
+    # 已结算的注：在结算时刻产生 (payout - stake) 的净资产变动（输则即 -stake）
+    settled = conn.execute(
+        "SELECT (payout - stake) AS delta, "
+        "COALESCE(settled_at, placed_at) AS ts FROM bets "
+        "WHERE user_id=? AND settled=1", (user_id,)).fetchall()
     conn.close()
-    bal, out = 0, []
-    for r in rows:
-        bal += r["delta"]
-        out.append({"ts": r["ts"], "balance": bal})
+    events = [(r["ts"], r["delta"]) for r in base] \
+        + [(r["ts"], r["delta"]) for r in settled]
+    events.sort(key=lambda e: e[0])
+    nw, out = 0, []
+    for ts, delta in events:
+        nw += delta
+        out.append({"ts": ts, "balance": nw})
     return out
 
 
