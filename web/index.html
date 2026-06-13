@@ -485,6 +485,10 @@
   .rank-table tr.rk-click { cursor: pointer; }
   .rank-table tr.rk-click:hover td { background: rgba(214,255,222,.035); }
 
+  .bet-ddl { color: var(--gold); letter-spacing: .05em; }
+  .bet-closed { margin-top: 16px; padding: 12px 14px; border: 1px dashed var(--line-strong);
+    border-radius: 3px; font-family: var(--mono); font-size: 12px; color: var(--faint); }
+
   /* 详情面板：我的投注概况 */
   .my-bets { margin-top: 16px; display: flex; align-items: center;
     flex-wrap: wrap; gap: 8px; }
@@ -1705,10 +1709,23 @@
       if (m.score) return;
       const o = S.odds[m.match];
       if (!o) return;
+      // 开球即截止：开球后不再渲染下注框，只留关闭提示
+      const kickoff = new Date(m.date_utc.replace(" ", "T")).getTime();
+      const closed = () => Date.now() >= kickoff;
+      const fmtLeft = () => {
+        const s = Math.max(0, Math.floor((kickoff - Date.now()) / 1000));
+        const h = Math.floor(s / 3600), mn = Math.floor((s % 3600) / 60);
+        return h ? `${h} 小时 ${mn} 分` : `${mn} 分钟`;
+      };
+      if (closed()) {
+        det.lastElementChild.insertAdjacentHTML("beforeend",
+          '<div class="bet-closed">已开球 · 下注通道关闭，完赛后自动结算</div>');
+        return;
+      }
       const names = { H: zh(m.home) + "胜", D: "平局", A: zh(m.away) + "胜" };
       const box = document.createElement("div");
       box.className = "bet-box";
-      box.innerHTML = `<div class="md-title">下注 · 虚拟积分</div>
+      box.innerHTML = `<div class="md-title">下注 · 虚拟积分 · <span class="bet-ddl">距开球截止还有 ${fmtLeft()}</span></div>
         <div class="bet-odds">${["H", "D", "A"].map(k =>
           `<button class="odds-btn" data-k="${k}"><span class="ol">${names[k]}</span><span class="ov">${o.odds[k].toFixed(2)}</span></button>`).join("")}</div>
         <div class="bet-stake">
@@ -1717,6 +1734,16 @@
           <button class="bet-submit">${S.me ? "下注" : "登录后下注"}</button>
         </div><div class="bet-msg"></div>`;
       det.lastElementChild.appendChild(box);
+      const tick = setInterval(() => {
+        if (!document.body.contains(box)) { clearInterval(tick); return; }
+        if (closed()) {
+          clearInterval(tick);
+          box.innerHTML = '<div class="bet-closed">已开球 · 下注通道关闭，完赛后自动结算</div>';
+          return;
+        }
+        const el = box.querySelector(".bet-ddl");
+        if (el) el.textContent = `距开球截止还有 ${fmtLeft()}`;
+      }, 30000);
 
       let pick = null;
       const msg = box.querySelector(".bet-msg");
@@ -1728,6 +1755,7 @@
         b.onclick = () => { box.querySelector("input").value = b.dataset.v; });
       box.querySelector(".bet-submit").onclick = async () => {
         if (!S.me) { location.href = "/api/auth/login"; return; }
+        if (closed()) { msg.textContent = "已开球，投注关闭"; msg.className = "bet-msg err"; return; }
         if (!pick) { msg.textContent = "先选一个方向"; msg.className = "bet-msg err"; return; }
         const stake = parseInt(box.querySelector("input").value, 10) || 0;
         if (stake < 10) { msg.textContent = "注额至少 10 分"; msg.className = "bet-msg err"; return; }
