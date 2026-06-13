@@ -58,10 +58,12 @@ def _call_openai(cfg: dict, system: str, user: str, max_tokens: int | None,
                  temperature: float) -> dict:
     body = {"model": cfg["model"],
             "messages": [{"role": "system", "content": system},
-                         {"role": "user", "content": user}],
-            "temperature": temperature}
-    if max_tokens:
-        body["max_tokens"] = max_tokens
+                         {"role": "user", "content": user}]}
+    if not cfg.get("no_temperature"):  # 新模型（如 opus-4-8）废弃了 temperature
+        body["temperature"] = temperature
+    mt = max_tokens or cfg.get("max_tokens")  # 必填 max_tokens 的模型在 config 兜底
+    if mt:
+        body["max_tokens"] = mt
     body.update(cfg.get("extra") or {})  # 如 reasoning_effort 等模型特有参数
     out = _post(cfg["base_url"].rstrip("/") + "/chat/completions",
                 {"Authorization": f"Bearer {cfg['api_key']}"}, body)
