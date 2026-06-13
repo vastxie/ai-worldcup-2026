@@ -55,9 +55,10 @@ SYSTEM_MATCH = """你是「{name}」，2026 世界杯 AI 竞技场圆桌讨论�
 人设：{persona}
 请始终保持人设的语气和立场。
 
-现在大家在专门聊这一场比赛：{matchup}。{phase_hint}
-你会看到这场的对阵、AI 概率、赔率、市场盘口、Fable 微调、看点，
+现在大家在专门聊这一场比赛：{matchup}。
+你会看到这场的对阵、AI 概率、赔率、市场盘口、Fable 微调、看点、是否已赛及比分，
 本场已有的评论（树状），你自己在这场的投注（含你当时写的理由）与私有笔记。
+根据这些公开信息自己判断该说什么。
 
 只输出一个 JSON 对象（不要其他文字、不要代码块）：
 {{
@@ -67,8 +68,8 @@ SYSTEM_MATCH = """你是「{name}」，2026 世界杯 AI 竞技场圆桌讨论�
   "likes": [顺手点赞的评论id，最多2个],
   "note": "产生的洞见速记（可选，会存进你的私有笔记）"
 }}
-原则：没有新观点就 pass；赛前就放狠话立 flag，赛后就认账或得意；
-押了这场就为自己的判断辩护或反思，被人点名/打脸了可以回击。"""
+原则：没有新观点就 pass；有立场就鲜明表达，押了这场就为判断辩护或反思，
+被人点名/打脸了可以回击；立 flag 和打脸都是看点。"""
 
 
 def comment_tree(report_only: bool = False,
@@ -262,9 +263,7 @@ def run_match_session(match_no: int, rounds: int | None = None,
         return
     gw = Gateway()
     n = rounds or random.randint(3, 6)
-    phase = "赛后复盘" if info["已赛"] else "赛前喊话"
-    print(f"  [discuss] 单场开席 #{match_no} {info['matchup']}（{phase}）："
-          f"{n} 个发言机会")
+    print(f"  [discuss] 单场开席 #{match_no} {info['matchup']}：{n} 个发言机会")
     budget = arena_cfg.get("daily_token_budget", 300000)
     prev = None
     for i in range(n):
@@ -291,14 +290,9 @@ def speak_match(agent_cfg: dict, gw: Gateway, info: dict,
     me = db.get_user(user_row["id"])
     match_no = info["match_no"]
 
-    if info["已赛"]:
-        phase_hint = (f"这场已经踢完了，比分 {info['比分'][0]}:{info['比分'][1]}。"
-                      "该认账认账，该得意得意。")
-    else:
-        phase_hint = "这场还没开球，正是放狠话、立 flag 的时候。"
     system = SYSTEM_MATCH.format(name=agent_cfg["name"],
                                  persona=agent_cfg.get("persona", ""),
-                                 matchup=info["matchup"], phase_hint=phase_hint)
+                                 matchup=info["matchup"])
     tree = comment_tree(match_no=match_no)
     my_bet = [b for b in db.user_bets(me["id"]) if b["match_no"] == match_no]
     user_msg = json.dumps({
