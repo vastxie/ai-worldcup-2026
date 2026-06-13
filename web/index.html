@@ -557,7 +557,7 @@
   @keyframes rowflash { 0% { background: rgba(184,245,61,.26); } 100% { background: transparent; } }
   .arena-chart g.cline { transition: opacity .15s; pointer-events: none; }
   .arena-chart svg.hovering g.cline:not(.hov) { opacity: .12; }
-  .arena-chart g.cline .cl-vis { fill: none; stroke-width: 2; stroke-linejoin: round; }
+  .arena-chart g.cline .cl-vis { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
   .arena-chart g.cline.hov .cl-vis { stroke-width: 3; }
   .arena-chart g.cline .cl-name { opacity: 0; transition: opacity .15s;
     font-weight: 700; paint-order: stroke; stroke: #0c1811; stroke-width: 4px; }
@@ -1329,9 +1329,8 @@
     }
 
     function agentChart(agents) {
-      const W = 760, H = 320, PL = 46, PR = 20, PT = 14, PB = 10;
+      const W = 760, H = 320, PL = 46, PR = 64, PT = 14, PB = 10;
       let maxV = 1200;
-      // 统一时间轴：所有选手共享真实时间范围，相同时刻的点对齐到同一横坐标
       const T = p => new Date(String(p.ts).replace(" ", "T")).getTime();
       let tMin = Infinity, tMax = -Infinity;
       agents.forEach(a => (a.timeline || []).forEach(p => {
@@ -1341,13 +1340,24 @@
         if (t > tMax) tMax = t;
       }));
       maxV *= 1.1;
-      // 序数时间轴：全局唯一时刻按先后均匀铺开，同一时刻对齐到同一横坐标，
-      // 既不被疏密时间挤压，又保证各线的事件先后正确对齐
-      const allTs = [...new Set(agents.flatMap(a => (a.timeline || []).map(T)))].sort((p, q) => p - q);
-      const ti = new Map(allTs.map((t, i) => [t, i]));
-      const denom = Math.max(allTs.length - 1, 1);
-      const x = t => PL + (W - PL - PR) * (ti.get(t) || 0) / denom;
+      // 序数时间轴：全局时刻（含当前 now）均匀铺开，避免稀疏交易被真实时间挤成一团
+      const now = Math.max(Date.now(), tMax);
+      const allT = [...new Set([...agents.flatMap(a => (a.timeline || []).map(T)), now])].sort((p, q) => p - q);
+      const denom = Math.max(allT.length - 1, 1);
+      const xi = new Map(allT.map((t, i) => [t, PL + (W - PL - PR) * i / denom]));
       const y = v => PT + (H - PT - PB) * (1 - v / maxV);
+      // Catmull-Rom → 三次贝塞尔，把折线磨成平滑曲线
+      const smooth = pts => {
+        if (pts.length < 2) return "";
+        let d = `M${pts[0][0].toFixed(1)},${pts[0][1].toFixed(1)}`;
+        for (let i = 0; i < pts.length - 1; i++) {
+          const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
+          const c1x = p1[0] + (p2[0] - p0[0]) / 6, c1y = p1[1] + (p2[1] - p0[1]) / 6;
+          const c2x = p2[0] - (p3[0] - p1[0]) / 6, c2y = p2[1] - (p3[1] - p1[1]) / 6;
+          d += `C${c1x.toFixed(1)},${c1y.toFixed(1)} ${c2x.toFixed(1)},${c2y.toFixed(1)} ${p2[0].toFixed(1)},${p2[1].toFixed(1)}`;
+        }
+        return d;
+      };
       let svg = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">`;
       for (let g = 0; g <= 4; g++) {
         const v = maxV * g / 4, yy = y(v);
@@ -1357,18 +1367,23 @@
       // 默认不标名称：悬停某条线时该线高亮并显示名称+当前积分，其余变暗
       agents.forEach((a, ai) => {
         const tl = a.timeline || [];
-        if (!tl.length) return;
         const col = agentColor(ai);
-        const pts = tl.map(p => [tl.length === 1 ? x(tMin) : x(T(p)), y(p.balance)]);
-        const ptStr = pts.map(p => p.map(v => v.toFixed(1)).join(",")).join(" ");
-        const last = pts[pts.length - 1];
-        const left = last[0] > W - 150;
+        // 前向填充：每个全局时刻取该刻及之前的最新余额（初始 1000），
+        // 余额无变动就水平延续——所有线从开局贯穿到当前，不是有节点才连
+        let bi = 0, bal = 1000;
+        const raw = allT.map(t => {
+          while (bi < tl.length && T(tl[bi]) <= t) { bal = tl[bi].balance; bi++; }
+          return [xi.get(t), y(bal)];
+        });
+        const lastBal = tl.length ? tl[tl.length - 1].balance : 1000;
+        const ptStr = raw.map(p => p.map(v => v.toFixed(1)).join(",")).join(" ");
+        const end = raw[raw.length - 1];
         svg += `<g class="cline" data-pts="${ptStr}" data-agent="${esc(a.login)}">
-          <polyline class="cl-vis" points="${ptStr}" stroke="${col}"/>
-          <circle cx="${last[0]}" cy="${last[1]}" r="3" fill="${col}"/>
-          <text class="cl-name" x="${last[0] + (left ? -9 : 9)}" y="${last[1] + 4}"
-            text-anchor="${left ? "end" : "start"}" font-size="11" fill="${col}"
-            font-family="IBM Plex Mono">${esc(a.name || a.login)} ${tl[tl.length - 1].balance}</text>
+          <path class="cl-vis" d="${smooth(raw)}" stroke="${col}"/>
+          <circle cx="${end[0].toFixed(1)}" cy="${end[1].toFixed(1)}" r="3" fill="${col}"/>
+          <text class="cl-name" x="${(end[0] - 9).toFixed(1)}" y="${(end[1] + 4).toFixed(1)}"
+            text-anchor="end" font-size="11" fill="${col}"
+            font-family="IBM Plex Mono">${esc(a.name || a.login)} ${lastBal}</text>
         </g>`;
       });
       svg += "</svg>";
