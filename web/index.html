@@ -260,27 +260,32 @@
     color: var(--lime); margin: 30px 0 10px; display: flex; align-items: center; gap: 12px; }
   .day-head::after { content: ""; flex: 1; height: 1px; background: var(--line); }
   .day-head .today-tag { color: var(--bg); background: var(--gold); padding: 1px 8px; border-radius: 2px; font-weight: 600; }
-  .mcard { display: grid; grid-template-columns: 116px 1fr; gap: 22px; align-items: center;
+  .mcard { display: grid; grid-template-columns: 152px 1fr; gap: 22px; align-items: center;
     border: 1px solid var(--line); border-radius: 4px; background: rgba(12,24,17,.45);
     padding: 16px 22px; margin-bottom: 8px; }
   .mcard.played { background: rgba(16,31,22,.7); }
-  .m-when { font-family: var(--mono); font-size: 11px; color: var(--faint); line-height: 1.7; }
+  .m-when { font-family: var(--mono); font-size: 11px; color: var(--faint); line-height: 1.7; min-width: 0; }
   .m-when .tm { font-size: 15px; color: var(--dim); font-weight: 600; display: block; }
+  .m-when .venue { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .stage-badge { display: inline-block; font-family: var(--mono); font-size: 10px; letter-spacing: .1em;
-    color: var(--dim); border: 1px solid var(--line); padding: 1px 7px; border-radius: 2px; margin-top: 4px; }
+    color: var(--dim); border: 1px solid var(--line); padding: 1px 7px; border-radius: 2px; margin-top: 4px;
+    white-space: nowrap; }
   .stage-badge.ko { color: var(--gold); border-color: rgba(255,215,94,.3); }
   .m-main { min-width: 0; }
-  .m-teams { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+  .m-teams { display: grid; grid-template-columns: 1fr minmax(130px, 200px) 1fr; align-items: center;
     gap: 14px; margin-bottom: 13px; }
   .m-side { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: 16px; min-width: 0; }
   .m-side .flag { font-size: 22px; flex: none; }
   .m-side span.n { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .m-side.away { justify-content: flex-end; }
   .m-side .tbd { color: var(--faint); font-weight: 400; font-size: 13px; }
-  .m-mid { text-align: center; font-family: var(--mono); }
+  .m-mid { display: flex; flex-direction: column; align-items: center; gap: 4px;
+    text-align: center; font-family: var(--mono); }
   .m-mid .sc { font-size: 23px; font-weight: 600; letter-spacing: .12em; white-space: nowrap; }
   .m-mid .vs { font-size: 12px; color: var(--faint); letter-spacing: .2em; }
-  .m-mid .pens { display: block; font-size: 10px; color: var(--gold); margin-top: 2px; }
+  .m-mid .m-pick { font-size: 11px; color: var(--dim); white-space: nowrap; }
+  .m-mid .m-pick-tags { display: flex; align-items: center; gap: 6px; }
+  .m-mid .pens { font-size: 10px; color: var(--gold); margin-top: 2px; }
   .m-pred { font-family: var(--mono); font-size: 11px; color: var(--faint); }
   .obar { display: flex; height: 11px; border-radius: 3px; overflow: hidden; margin: 0 0 7px; }
   .obar.dim { opacity: .5; }
@@ -1260,22 +1265,25 @@
             </span><span>#${m.match}</span>
           </div></div>`;
       }
+    } else if (m.pred) {
+      // 未赛：中间放预测比分（看好方向 + 比分 + 防平/Fable），出结果后由真实比分顶替
+      const tags = `${m.pred.p_draw >= 0.28 ? '<span class="draw-warn">防平</span>' : ""}${fableTag(m.pred)}`;
+      mid = `<span class="m-mid"><span class="vs">VS</span>
+        <span class="m-pick">看好 ${pickLabel(m, m.pred)} ${m.pred.pred_score.join("-")}</span>
+        ${tags ? `<span class="m-pick-tags">${tags}</span>` : ""}</span>`;
+      const adv = m.pred.p_adv_home != null
+        ? `<span class="m-adv">晋级 ${pct(m.pred.p_adv_home, 0)} / ${pct(m.pred.p_adv_away, 0)}</span>` : "";
+      predHTML = `<div class="m-pred">
+        ${obar(m.pred)}${probs(m.pred)}
+        <div class="pred-foot"><span>${adv}</span><span>#${m.match}</span></div>
+      </div>`;
     } else {
       mid = `<span class="m-mid"><span class="vs">VS</span></span>`;
-      if (m.pred) {
-        const adv = m.pred.p_adv_home != null
-          ? `<span class="m-adv">晋级 ${pct(m.pred.p_adv_home, 0)} / ${pct(m.pred.p_adv_away, 0)}</span>` : "";
-        predHTML = `<div class="m-pred">
-          ${obar(m.pred)}${probs(m.pred)}
-          <div class="pred-foot"><span>看好 ${pickLabel(m, m.pred)} ${m.pred.pred_score.join("-")}${m.pred.p_draw >= 0.28 ? '<span class="draw-warn">防平</span>' : ""}${fableTag(m.pred)}</span><span>${adv}${adv ? " · " : ""}#${m.match}</span></div>
-        </div>`;
-      } else {
-        predHTML = `<div class="m-pred"><div class="pred-foot"><span>对阵确定后给出预测</span><span>#${m.match}</span></div></div>`;
-      }
+      predHTML = `<div class="m-pred"><div class="pred-foot"><span>对阵确定后给出预测</span><span>#${m.match}</span></div></div>`;
     }
     const clickable = m.pred && byMatch[m.match] && byMatch[m.match].pred;
     return `<div class="mcard${m.score ? " played" : ""}${clickable ? " clickable" : ""}" data-match="${m.match}">
-      <div class="m-when"><span class="tm">${time}</span>${esc(m.venue)}<br>${badge}</div>
+      <div class="m-when"><span class="tm">${time}</span><span class="venue" title="${esc(m.venue)}">${esc(m.venue)}</span>${badge}</div>
       <div class="m-main">
         <div class="m-teams">${sideHTML(m.home, m.slot_home, false)}${mid}${sideHTML(m.away, m.slot_away, true)}</div>
         ${predHTML}
