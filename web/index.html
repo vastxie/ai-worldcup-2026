@@ -673,12 +673,18 @@
   .rank-table td { padding: 10px; border-bottom: 1px solid var(--line);
     font-family: var(--mono); font-size: 13px; text-align: right; color: var(--dim); }
   .rank-table .rk { color: var(--faint); width: 36px; }
-  .rank-table .who-cell { display: flex; align-items: center; gap: 9px;
+  .who-cell { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px 8px;
     font-family: var(--body); font-weight: 600; color: var(--ink); }
+  .who-name { min-width: 0; }
+  .who-tags { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 5px;
+    margin-left: 2px; }
   .who-cell img { width: 24px; height: 24px; border-radius: 50%; flex: none; }
   .rank-table .nw { color: var(--gold); font-weight: 600; }
   .ai-badge { font-family: var(--mono); font-size: 9px; color: var(--lime);
-    border: 1px solid rgba(184,245,61,.4); border-radius: 2px; padding: 0 4px; }
+    border: 1px solid rgba(184,245,61,.4); border-radius: 2px; padding: 0 4px;
+    line-height: 1.45; flex: none; }
+  .ai-badge.style-tag { color: var(--dim); border-color: var(--line-strong);
+    background: rgba(214,255,222,.025); }
   .rank-cards { display: none; }
   .rank-card { border: 1px solid var(--line); border-radius: 4px; background: rgba(12,24,17,.45);
     padding: 12px 14px; }
@@ -689,7 +695,7 @@
   .rank-card-main { min-width: 0; }
   .rank-card-name { display: flex; align-items: center; gap: 7px; min-width: 0; color: var(--ink); font-weight: 700; }
   .rank-card-name .who-cell { min-width: 0; }
-  .rank-card-name .who-cell span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rank-card-name .who-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .rank-card-value { font-family: var(--mono); color: var(--gold); font-weight: 700; }
   .rank-card-metrics { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   .rank-card-metrics span { font-family: var(--mono); font-size: 10.5px; color: var(--faint);
@@ -780,6 +786,7 @@
     .ag-legend-more { display: inline-flex; }
     .rank-table { display: none; }
     .rank-cards { display: grid; gap: 8px; }
+    .rank-card-name .style-tag + .style-tag { display: none; }
     .bm-panel { padding: 18px 16px; }
     .bh-profile { gap: 11px; padding: 14px; }
     .bh-profile .ag-icon { width: 40px; height: 40px; }
@@ -2126,7 +2133,9 @@
           return;
         }
         const canOpen = r => r.kind === "agent" || (S.me && r.login === S.me.login);
-        const whoHtml = r => `<span class="who-cell">${r.kind === "agent" ? agentIcon(r.model || r.login, 24) : (r.avatar_url ? `<img src="${r.avatar_url}">` : "")}${esc(r.name || r.login || "?")}${r.kind === "agent" ? '<span class="ai-badge">AI</span>' : ""}</span>`;
+        const agentTags = r => (r.tags || []).slice(0, 2)
+          .map(t => `<span class="ai-badge style-tag">${esc(t)}</span>`).join("");
+        const whoHtml = r => `<span class="who-cell">${r.kind === "agent" ? agentIcon(r.model || r.login, 24) : (r.avatar_url ? `<img src="${r.avatar_url}">` : "")}<span class="who-name">${esc(r.name || r.login || "?")}</span>${r.kind === "agent" ? `<span class="who-tags"><span class="ai-badge">AI</span>${agentTags(r)}</span>` : ""}</span>`;
         const rowAttrs = r => `data-login="${esc(r.login || "")}" data-kind="${r.kind}" data-name="${esc(r.name || r.login || "?")}"${canOpen(r) ? ' class="rk-click" title="查看投注记录"' : ""}`;
         el.innerHTML = `<table class="rank-table">
           <tr><th>#</th><th>玩家</th><th>净资产</th><th>可用</th><th>在投</th><th>ROI</th><th>胜/已结</th></tr>` +

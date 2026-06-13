@@ -527,6 +527,43 @@ def settle_finished_bets() -> int:
     return settled
 
 
+def _strategy_tags_from_rows(rows: list) -> list[str]:
+    """根据一名选手的全部投注行算"打法"标签（纯计算、不查库，避免 N+1）。"""
+    n = len(rows)
+    if n < 2:
+        return []  # 样本不足就不打标签，等真有打法了再"长"出来
+
+    total_stake = sum(max(0, int(r["stake"] or 0)) for r in rows) or n
+
+    def stake_share(predicate) -> float:
+        return sum(max(0, int(r["stake"] or 0)) for r in rows
+                   if predicate(r)) / total_stake
+
+    avg_odds = sum(float(r["odds"]) * max(1, int(r["stake"] or 0))
+                   for r in rows) / total_stake
+    high_share = stake_share(lambda r: float(r["odds"]) >= 2.45)
+    low_share = stake_share(lambda r: float(r["odds"]) <= 1.80)
+    fav_share = stake_share(lambda r: float(r["odds"]) <= 1.65)
+    draw_share = stake_share(lambda r: r["pick"] == "D")
+    high_hits = sum(1 for r in rows
+                    if float(r["odds"]) >= 2.45
+                    and r["settled"] and int(r["payout"] or 0) > int(r["stake"]))
+
+    tags: list[str] = []
+    if high_hits and high_share >= 0.20:
+        tags.append("冷门捕手")
+    elif high_share >= 0.38 or avg_odds >= 2.35:
+        tags.append("高赔率猎手")
+    if draw_share >= 0.30:
+        tags.append("防平专家")
+    if low_share >= 0.62 or avg_odds <= 1.75:
+        tags.append("稳健派")
+    if fav_share >= 0.52 and "稳健派" not in tags:
+        tags.append("跟强队")
+
+    return tags[:2]  # 无明显打法就空着，不用占位词凑数
+
+
 def leaderboard(limit: int = 100) -> list[dict]:
     conn = connect()
     rows = conn.execute("""
@@ -542,14 +579,21 @@ def leaderboard(limit: int = 100) -> list[dict]:
         GROUP BY u.id ORDER BY (u.balance + COALESCE(SUM(
             CASE WHEN b.settled=0 THEN b.stake END), 0)) DESC
         LIMIT ?""", (limit,)).fetchall()
-    conn.close()
+    # 一次性拉全部投注，内存按选手分组算标签——避免每个 agent 单独查库（N+1）
+    bets_by_user: dict[int, list] = {}
+    for b in conn.execute("SELECT user_id, pick, stake, odds, settled, payout "
+                          "FROM bets").fetchall():
+        bets_by_user.setdefault(b["user_id"], []).append(b)
     out = []
     for r in rows:
         d = dict(r)
         d["roi"] = (round((d["returned"] - d["staked"]) / d["staked"], 4)
                     if d["staked"] else None)
         d["net_worth"] = d["balance"] + d["in_play"]
+        d["tags"] = (_strategy_tags_from_rows(bets_by_user.get(d["id"], []))
+                     if d["kind"] == "agent" else [])
         out.append(d)
+    conn.close()
     return out
 
 
