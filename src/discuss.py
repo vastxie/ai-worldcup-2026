@@ -105,6 +105,11 @@ def _match_info(match_no: int, data: dict) -> dict | None:
                 "平D": round(1 / max(p["p_draw"], 0.02), 2),
                 "客胜A": round(1 / max(p["p_away"], 0.02), 2)}
     blurb = db.load_blurbs().get(str(match_no))
+    # 本场相关情报：标题提到主/客队的，直接给全文（聚焦单场，公开资料按需展开）
+    rel_ids = [it["id"] for it in db.intel_index(20)
+               if hn in it["title"] or an in it["title"]][:3]
+    related = [{"标题": d["title"], "正文": d["content"]}
+               for d in db.intel_get(rel_ids)]
     return {
         "match_no": match_no, "matchup": f"{hn} vs {an}",
         "阶段": m.get("stage"), "开球UTC": m["date_utc"],
@@ -117,6 +122,7 @@ def _match_info(match_no: int, data: dict) -> dict | None:
         "Fable微调": (f"{p['fable']['delta']:+g}百分点(主队向)·{p['fable']['note']}"
                      if p.get("fable") else None),
         "看点": blurb["text"] if blurb else None,
+        "本场相关情报": related,
     }
 
 
