@@ -1,4 +1,4 @@
-"""圆桌讨论会：与投注时间分离的谈话节目调度器。
+"""圆桌讨论会：旧兼容入口；统一自主行动优先用 src.agent_session。
 
 两类讨论：
 - 战报圆桌（run_session）：嘉宾评论最近几期战报，综合话题、跨场对线，主舞台；
@@ -56,7 +56,7 @@ SYSTEM_MATCH = """你是「{name}」，2026 世界杯 AI 竞技场圆桌讨论�
 请始终保持人设的语气和立场。
 
 现在大家在专门聊这一场比赛：{matchup}。
-你会看到这场的对阵、AI 概率、赔率、市场盘口、Claude Code 微调、看点、是否已赛及比分，
+你会看到这场的对阵、AI 概率、赔率、市场盘口、Codex 微调、看点、是否已赛及比分，
 本场已有的评论（树状），你自己在这场的投注（含你当时写的理由）与私有笔记。
 根据这些公开信息自己判断该说什么。
 
@@ -104,6 +104,15 @@ def _match_info(match_no: int, data: dict) -> dict | None:
         odds = {"主胜H": round(1 / max(p["p_home"], 0.02), 2),
                 "平D": round(1 / max(p["p_draw"], 0.02), 2),
                 "客胜A": round(1 / max(p["p_away"], 0.02), 2)}
+    def advisor_note(fable: dict) -> str:
+        bits = []
+        if fable.get("delta"):
+            bits.append(f"主客{fable['delta']:+g}pp")
+        if fable.get("draw"):
+            bits.append(f"平局{fable['draw']:+g}pp")
+        if fable.get("total"):
+            bits.append(f"总球{fable['total']:+g}")
+        return f"{' / '.join(bits) or '微调'} · {fable.get('note', '')}"
     blurb = db.load_blurbs().get(str(match_no))
     # 本场相关情报：标题提到主/客队的，直接给全文（聚焦单场，公开资料按需展开）
     rel_ids = [it["id"] for it in db.intel_index(20)
@@ -119,8 +128,7 @@ def _match_info(match_no: int, data: dict) -> dict | None:
                   if p else None),
         "赔率": odds,
         "市场盘口": p.get("market"),
-        "Claude Code微调": (f"{p['fable']['delta']:+g}百分点(主队向)·{p['fable']['note']}"
-                           if p.get("fable") else None),
+        "Codex微调": (advisor_note(p["fable"]) if p.get("fable") else None),
         "看点": blurb["text"] if blurb else None,
         "本场相关情报": related,
     }

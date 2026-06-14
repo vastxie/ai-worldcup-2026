@@ -62,33 +62,73 @@ def _devig(prices: dict[str, float]) -> dict[str, float]:
     return {k: v / s for k, v in inv.items()} if s else {}
 
 
+def _total_from_market(outcomes: list[dict]) -> float | None:
+    """由大小球盘口粗略反推总进球期望。
+
+    足球 totals 常以 2.5/3.0 等盘口给出。这里保守地用盘口点位作为中心，
+    再用去水后的 over 概率做小幅方向修正；没有完整 over/under 时跳过。
+    """
+    pairs: dict[float, dict[str, float]] = {}
+    for o in outcomes:
+        try:
+            point = float(o.get("point"))
+            price = float(o.get("price"))
+        except (TypeError, ValueError):
+            continue
+        name = str(o.get("name", "")).lower()
+        side = "over" if "over" in name else "under" if "under" in name else None
+        if side and price > 1:
+            pairs.setdefault(point, {})[side] = price
+    estimates = []
+    for point, prices in pairs.items():
+        if "over" not in prices or "under" not in prices:
+            continue
+        probs = _devig({"O": prices["over"], "U": prices["under"]})
+        if len(probs) != 2:
+            continue
+        estimates.append(point + (probs["O"] - 0.5) * 0.6)
+    if not estimates:
+        return None
+    return round(statistics.median(estimates), 3)
+
+
 def _fetch_h2h(key: str) -> dict:
-    """逐场胜平负市场概率：{ "HOME|AWAY": {p_home, p_draw, p_away, books} }"""
+    """逐场市场概率：{ "HOME|AWAY": {p_home, p_draw, p_away, total_goals?} }"""
     events = _get(f"{BASE}/soccer_fifa_world_cup/odds/"
-                  f"?apiKey={key}&regions=eu&markets=h2h&oddsFormat=decimal")
+                  f"?apiKey={key}&regions=eu&markets=h2h,totals"
+                  f"&oddsFormat=decimal")
     out = {}
     for ev in events:
         hc, ac = _to_code(ev["home_team"]), _to_code(ev["away_team"])
         if not hc or not ac:
             continue
-        ph, pd, pa = [], [], []
+        ph, pd, pa, totals = [], [], [], []
         for bk in ev.get("bookmakers", []):
             for mk in bk.get("markets", []):
-                if mk["key"] != "h2h":
-                    continue
-                prices = {o["name"]: o["price"] for o in mk["outcomes"]}
-                probs = _devig({"H": prices.get(ev["home_team"], 0),
-                                "D": prices.get("Draw", 0),
-                                "A": prices.get(ev["away_team"], 0)})
-                if len(probs) == 3:
-                    ph.append(probs["H"]); pd.append(probs["D"]); pa.append(probs["A"])
+                if mk["key"] == "h2h":
+                    prices = {o["name"]: o["price"] for o in mk["outcomes"]}
+                    probs = _devig({"H": prices.get(ev["home_team"], 0),
+                                    "D": prices.get("Draw", 0),
+                                    "A": prices.get(ev["away_team"], 0)})
+                    if len(probs) == 3:
+                        ph.append(probs["H"])
+                        pd.append(probs["D"])
+                        pa.append(probs["A"])
+                elif mk["key"] == "totals":
+                    total = _total_from_market(mk.get("outcomes", []))
+                    if total is not None:
+                        totals.append(total)
         if len(ph) >= 3:  # 至少 3 家庄家才采信
-            out[f"{hc}|{ac}"] = {
+            row = {
                 "p_home": round(statistics.median(ph), 4),
                 "p_draw": round(statistics.median(pd), 4),
                 "p_away": round(statistics.median(pa), 4),
                 "books": len(ph),
             }
+            if len(totals) >= 3:
+                row["total_goals"] = round(statistics.median(totals), 3)
+                row["total_books"] = len(totals)
+            out[f"{hc}|{ac}"] = row
     return out
 
 

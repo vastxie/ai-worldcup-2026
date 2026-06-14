@@ -33,7 +33,7 @@ from pathlib import Path
 from . import db, fetch, odds, report
 from .utils import atomic_write_text
 from .model import match_probabilities, score_grid
-from .state import build_state
+from .state import build_state, lock_prediction_override
 from .tournament import GROUPS, simulate_tournament
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -102,7 +102,7 @@ def _run_chunk(state: dict, sims: int, seed: int) -> dict:
 def _chunk_worker(args: tuple[int, int]) -> dict:
     """子进程入口：自行重建状态（由数据文件确定性推导）。"""
     sims, seed = args
-    return _run_chunk(build_state(), sims, seed)
+    return _run_chunk(build_state(write_side_effects=False), sims, seed)
 
 
 def _merge(parts: list[dict], by_code: dict) -> dict:
@@ -200,12 +200,14 @@ def build_schedule(state: dict) -> list[dict]:
                            "base": rec.get("base")}
             row["outcome_hit"] = rec["outcome_hit"]
             row["score_hit"] = rec["score_hit"]
+            row["top3_score_hit"] = rec.get("top3_score_hit")
         elif m["home"] and m["away"] and not m["score"]:  # 未赛但对阵已知
             ko = m["stage"] != "group"
             home, away = by_code[m["home"]], by_code[m["away"]]
             lk = state["locked"].get(str(m["match"]))
-            we_o = lk["we"] if lk else None
-            pred = match_probabilities(home, away, knockout=ko, we_override=we_o)
+            pred_o = lock_prediction_override(lk)
+            pred = match_probabilities(home, away, knockout=ko,
+                                       we_override=pred_o)
             row["pred"] = {
                 "p_home": round(pred["p_win"], 4),
                 "p_draw": round(pred["p_draw"], 4),
@@ -214,13 +216,14 @@ def build_schedule(state: dict) -> list[dict]:
                 "pred_score": list(pred["outcome_score"][0]),
                 "top_scores": [{"score": list(s), "p": round(p, 4)}
                                for s, p in pred["top_scores"][:5]],
-                "grid": score_grid(home, away, we_override=we_o),
+                "grid": score_grid(home, away, we_override=pred_o),
                 "market": lk["market"] if lk else None,
             }
             fable = lk.get("fable") if lk else None
             if fable and lk.get("we_base") is not None:
+                base_o = lock_prediction_override(lk, base=True)
                 pred_b = match_probabilities(home, away, knockout=ko,
-                                             we_override=lk["we_base"])
+                                             we_override=base_o)
                 row["pred"]["fable"] = fable
                 row["pred"]["base"] = {"p_home": round(pred_b["p_win"], 4),
                                        "p_draw": round(pred_b["p_draw"], 4),
@@ -290,9 +293,9 @@ def print_report(payload: dict, published: bool = True) -> None:
         fable_note = ""
         if stats.get("n_adjusted"):
             fable_note = (f" | 纯引擎 Brier {stats['brier_base']:.3f}"
-                          f"（Claude Code 微调 {stats['n_adjusted']} 场）")
+                          f"（Codex 微调 {stats['n_adjusted']} 场）")
         print(f"  预测战绩: 胜平负命中 {stats['outcome_acc'] * 100:.0f}%"
-              f" | 精确比分命中 {stats['score_acc'] * 100:.0f}%"
+              f" | Top3 比分命中 {stats.get('top3_score_acc', 0) * 100:.0f}%"
               f" | Brier {stats['brier']:.3f}  (共 {stats['n']} 场)"
               + fable_note)
         print("-" * 78)

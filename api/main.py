@@ -30,6 +30,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src import db  # noqa: E402
+from src.model import exact_score_prob  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -80,6 +81,9 @@ SESSION_COOKIE = "wc_session"
 SESSION_TTL = 30 * 24 * 3600
 MIN_STAKE, MAX_STAKE = 10, 100000
 ODDS_CAP_P = 0.02          # 概率下限 → 赔率上限 50x
+SCORE_MIN_STAKE, SCORE_MAX_STAKE = 10, 50
+SCORE_MAX_GOALS = 6
+SCORE_ODDS_CAP_P = 1 / 80  # 比分投注赔率上限 80x
 
 app = FastAPI(title="worldcup-arena", docs_url=None, redoc_url=None)
 db.init_db()
@@ -174,11 +178,22 @@ def current_odds() -> dict:
     mtime = path.stat().st_mtime
     if mtime != _odds_cache["mtime"]:
         payload = json.loads(path.read_text(encoding="utf-8"))
+        teams = {t["code"]: t for t in payload.get("teams", [])}
         table = {}
         for m in payload["schedule"]:
             p = m.get("pred")
             if not p or m.get("score"):
                 continue
+            score_probs, score_odds = {}, {}
+            home, away = teams.get(m.get("home")), teams.get(m.get("away"))
+            if home and away:
+                for gh in range(SCORE_MAX_GOALS + 1):
+                    for ga in range(SCORE_MAX_GOALS + 1):
+                        key = f"{gh}-{ga}"
+                        prob = exact_score_prob(home, away, gh, ga,
+                                                we_override=p)
+                        score_probs[key] = round(prob, 5)
+                        score_odds[key] = round(1 / max(prob, SCORE_ODDS_CAP_P), 2)
             table[m["match"]] = {
                 "date_utc": m["date_utc"],
                 "home": m["home"], "away": m["away"],
@@ -187,6 +202,9 @@ def current_odds() -> dict:
                          for k, v in
                          {"H": p["p_home"], "D": p["p_draw"],
                           "A": p["p_away"]}.items()},
+                "score_odds": score_odds,
+                "score_probs": score_probs,
+                "score_max_goals": SCORE_MAX_GOALS,
             }
         _odds_cache.update(mtime=mtime, data=table)
     return _odds_cache["data"]
@@ -320,6 +338,49 @@ async def create_bet(request: Request):
             "balance": fresh["balance"]}
 
 
+@app.post("/api/score-bets")
+async def create_score_bet(request: Request):
+    check_origin(request)
+    rate_limit(request, "score-bet", 20)
+    user = require_user(request)
+    try:
+        body = await request.json()
+        match_no = int(body["match_no"])
+        home_score = int(body["home_score"])
+        away_score = int(body["away_score"])
+        stake = int(body["stake"])
+    except Exception:  # noqa: BLE001
+        raise HTTPException(422, "参数格式错误")
+
+    if not (0 <= home_score <= SCORE_MAX_GOALS
+            and 0 <= away_score <= SCORE_MAX_GOALS):
+        raise HTTPException(422, f"比分范围 0~{SCORE_MAX_GOALS}")
+    if not (SCORE_MIN_STAKE <= stake <= SCORE_MAX_STAKE):
+        raise HTTPException(422, f"比分注额范围 {SCORE_MIN_STAKE}~{SCORE_MAX_STAKE}")
+
+    table = current_odds()
+    entry = table.get(match_no)
+    if not entry:
+        raise HTTPException(400, "该场暂不可投注（对阵未定或已完赛）")
+    if kickoff_passed(entry["date_utc"]):
+        raise HTTPException(400, "已开球，投注关闭")
+
+    key = f"{home_score}-{away_score}"
+    odds_val = (entry.get("score_odds") or {}).get(key)
+    if odds_val is None:
+        raise HTTPException(400, "该比分暂不可投注")
+    try:
+        bet = db.place_score_bet(user["id"], match_no, home_score,
+                                 away_score, stake, odds_val)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    fresh = db.get_user(user["id"])
+    return {"bet": {k: bet[k] for k in
+                    ("id", "match_no", "home_score", "away_score",
+                     "stake", "odds", "placed_at")},
+            "balance": fresh["balance"]}
+
+
 @app.get("/api/bets/me")
 def my_bets(request: Request):
     user = require_user(request)
@@ -343,16 +404,7 @@ def agent_bet_history(login: str):
 @app.get("/api/bets/recent")
 def recent_bets():
     """公开最近 AI 投注流，用于比赛卡角标与动态。人类投注不上墙。"""
-    conn = db.connect()
-    rows = conn.execute("""
-        SELECT b.match_no, b.pick, b.stake, b.odds, b.settled, b.payout,
-               b.placed_at, b.reason, u.kind, u.login, u.name, u.avatar_url,
-               u.model
-        FROM bets b JOIN users u ON u.id=b.user_id
-        WHERE u.kind='agent'
-        ORDER BY b.id DESC LIMIT 100""").fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    return db.recent_agent_bets(100)
 
 
 @app.post("/api/posts/{post_id}/like")
@@ -368,17 +420,29 @@ async def like_post(post_id: int, request: Request):
 
 @app.get("/api/agents")
 def agents_info():
-    """AI 选手专区：选手卡 + 积分曲线 + 战报圆桌发言（比赛评论走另一端点）。"""
+    """AI 选手专区：选手卡 + 积分曲线。讨论流走 /api/posts。"""
     rows = db.leaderboard(100)
     agents = [r for r in rows if r["kind"] == "agent"]
     for a in agents:
         a["timeline"] = db.balance_timeline(a["id"])
-    return {"agents": agents, "posts": db.agent_posts(100, report_only=True)}
+    return {"agents": agents}
+
+
+@app.get("/api/posts")
+def posts_feed(limit: int = 30, before_id: int | None = None,
+               topic_type: str | None = None,
+               topic_id: int | None = None):
+    """统一 AI 讨论区：主帖按最新回复倒序分页，回帖嵌套返回。"""
+    limit = max(1, min(limit, 100))
+    if topic_type not in {None, "match", "report", "general"}:
+        raise HTTPException(400, "topic_type 不合法")
+    return db.discussion_threads(limit, before_id=before_id,
+                                 topic_type=topic_type, topic_id=topic_id)
 
 
 @app.get("/api/posts/match/{match_no}")
 def match_posts(match_no: int):
-    """某场比赛的圆桌评论（公开）。"""
+    """兼容旧入口：某场比赛相关讨论。"""
     return db.agent_posts(200, match_no=match_no)
 
 

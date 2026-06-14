@@ -33,7 +33,9 @@ def load_teams() -> dict[str, dict]:
     if spath.exists():
         strengths = json.loads(spath.read_text(encoding="utf-8"))
         for code, t in teams.items():
-            t["open"] = strengths.get(code, {}).get("open", 1.0)
+            for key, val in strengths.get(code, {}).items():
+                if key in {"att", "def", "eff", "open"}:
+                    t[key] = val
     return teams
 
 
@@ -42,7 +44,114 @@ def outcome_of(score) -> str:
     return "H" if gh > ga else ("A" if ga > gh else "D")
 
 
-def build_state() -> dict:
+def _normalize_probs(probs: dict) -> dict:
+    vals = {
+        "p_home": max(float(probs.get("p_home", 0)), 0.001),
+        "p_draw": max(float(probs.get("p_draw", 0)), 0.001),
+        "p_away": max(float(probs.get("p_away", 0)), 0.001),
+    }
+    s = sum(vals.values())
+    return {k: v / s for k, v in vals.items()}
+
+
+def _probs_from_pred(pred: dict) -> dict:
+    return {"p_home": pred["p_win"], "p_draw": pred["p_draw"],
+            "p_away": pred["p_loss"]}
+
+
+def _round_probs(probs: dict) -> dict:
+    probs = _normalize_probs(probs)
+    ph = round(probs["p_home"], 4)
+    pd = round(probs["p_draw"], 4)
+    pa = round(1.0 - ph - pd, 4)
+    if pa < 0:
+        return {k: round(v, 4) for k, v in _normalize_probs(probs).items()}
+    return {"p_home": ph, "p_draw": pd, "p_away": pa}
+
+
+def _we_from_probs(probs: dict) -> float:
+    return probs["p_home"] + 0.5 * probs["p_draw"]
+
+
+def _blend_probs(model_probs: dict, market_probs: dict | None) -> dict:
+    if not market_probs:
+        return _round_probs(model_probs)
+    return _round_probs({
+        k: MODEL_WEIGHT * model_probs[k] + (1 - MODEL_WEIGHT) * market_probs[k]
+        for k in ("p_home", "p_draw", "p_away")
+    })
+
+
+def _shift_home_edge(probs: dict, delta_pp: float) -> dict:
+    p = dict(_normalize_probs(probs))
+    d = float(delta_pp or 0) / 100.0
+    floor = 0.01
+    if d > 0:
+        move = min(d, max(p["p_away"] - floor, 0), max(0.98 - p["p_home"], 0))
+        p["p_home"] += move
+        p["p_away"] -= move
+    elif d < 0:
+        move = min(-d, max(p["p_home"] - floor, 0), max(0.98 - p["p_away"], 0))
+        p["p_home"] -= move
+        p["p_away"] += move
+    return _normalize_probs(p)
+
+
+def _shift_draw(probs: dict, delta_pp: float) -> dict:
+    p = dict(_normalize_probs(probs))
+    d = float(delta_pp or 0) / 100.0
+    floor = 0.01
+    hd_sum = p["p_home"] + p["p_away"]
+    if d > 0 and hd_sum > 0:
+        move = min(d, max(p["p_home"] - floor, 0) + max(p["p_away"] - floor, 0),
+                   max(0.6 - p["p_draw"], 0))
+        for k in ("p_home", "p_away"):
+            cut = move * p[k] / hd_sum
+            p[k] = max(p[k] - cut, floor)
+        p["p_draw"] += move
+    elif d < 0:
+        move = min(-d, max(p["p_draw"] - floor, 0))
+        p["p_draw"] -= move
+        hd_sum = p["p_home"] + p["p_away"]
+        p["p_home"] += move * (p["p_home"] / hd_sum if hd_sum else 0.5)
+        p["p_away"] += move * (p["p_away"] / hd_sum if hd_sum else 0.5)
+    return _normalize_probs(p)
+
+
+def _apply_adjust(probs: dict, total_goals: float,
+                  adjust: dict | None) -> tuple[dict, float]:
+    if not adjust:
+        return _round_probs(probs), round(total_goals, 3)
+    out = _shift_home_edge(probs, adjust.get("delta", 0))
+    out = _shift_draw(out, adjust.get("draw", 0))
+    total = min(max(total_goals + float(adjust.get("total", 0) or 0), 0.8), 5.5)
+    return _round_probs(out), round(total, 3)
+
+
+def _market_probs(market: dict | None) -> dict | None:
+    if not market:
+        return None
+    return _normalize_probs({"p_home": market["p_home"], "p_draw": market["p_draw"],
+                             "p_away": market["p_away"]})
+
+
+def lock_prediction_override(lock: dict | None, base: bool = False):
+    """把 DB 锁档转换成模型可消费的 override；兼容旧 we-only 锁档。"""
+    if not lock:
+        return None
+    probs = lock.get("probs_base" if base else "probs")
+    total = lock.get("total_goals_base" if base else "total_goals")
+    we = lock.get("we_base" if base else "we")
+    if probs:
+        out = dict(probs)
+        out["we"] = we if we is not None else _we_from_probs(probs)
+        if total is not None:
+            out["total_goals"] = total
+        return out
+    return we
+
+
+def build_state(write_side_effects: bool = True) -> dict:
     """回放全部已赛比赛，返回当前完整状态。"""
     by_code = load_teams()
     for t in by_code.values():
@@ -56,7 +165,7 @@ def build_state() -> dict:
     locked = db.load_locks()
 
     records = []           # 已赛比赛的事前预测 vs 实际
-    n_outcome_hit = n_score_hit = 0
+    n_outcome_hit = n_score_hit = n_top3_score_hit = 0
     brier_sum = 0.0
     brier_base_sum = 0.0   # 反事实基线：若无主观微调，纯引擎+市场的误差
     n_adjusted = 0
@@ -65,8 +174,8 @@ def build_state() -> dict:
         home, away = by_code[m["home"]], by_code[m["away"]]
         ko = m["stage"] != "group"
         lk = locked.get(str(m["match"]))
-        we_o = lk["we"] if lk else None
-        pred = match_probabilities(home, away, knockout=ko, we_override=we_o)
+        pred_o = lock_prediction_override(lk)
+        pred = match_probabilities(home, away, knockout=ko, we_override=pred_o)
         top_score = pred["outcome_score"][0]  # 与胜负判断一致的首选比分
 
         actual = outcome_of(m["score"])
@@ -74,8 +183,12 @@ def build_state() -> dict:
         predicted = max(probs, key=probs.get)
         outcome_hit = predicted == actual
         score_hit = list(top_score) == list(m["score"])
+        top3_score_hit = list(m["score"]) in [
+            list(s) for s, _ in pred["top_scores"][:3]
+        ]
         n_outcome_hit += outcome_hit
         n_score_hit += score_hit
+        n_top3_score_hit += top3_score_hit
         brier_sum += sum((probs[o] - (1.0 if o == actual else 0.0)) ** 2
                          for o in "HDA")
 
@@ -84,8 +197,9 @@ def build_state() -> dict:
         base = None
         if fable and lk.get("we_base") is not None:
             n_adjusted += 1
+            base_o = lock_prediction_override(lk, base=True)
             pred_b = match_probabilities(home, away, knockout=ko,
-                                         we_override=lk["we_base"])
+                                         we_override=base_o)
             probs_b = {"H": pred_b["p_win"], "D": pred_b["p_draw"],
                        "A": pred_b["p_loss"]}
             base = {k: round(v, 4) for k, v in
@@ -107,14 +221,16 @@ def build_state() -> dict:
             "pred_score": list(top_score),
             "top_scores": [{"score": list(s), "p": round(p, 4)}
                            for s, p in pred["top_scores"][:5]],
-            "grid": score_grid(home, away, we_override=we_o),
+            "grid": score_grid(home, away, we_override=pred_o),
             "p_actual_score": round(
-                exact_score_prob(home, away, *m["score"], we_override=we_o), 4),
+                exact_score_prob(home, away, *m["score"],
+                                 we_override=pred_o), 4),
             "market": lk.get("market") if lk else None,
             "elo_home_before": round(home["elo"], 1),
             "elo_away_before": round(away["elo"], 1),
             "outcome_hit": outcome_hit,
             "score_hit": score_hit,
+            "top3_score_hit": top3_score_hit,
             "fable": fable,
             "base": base,
         })
@@ -123,9 +239,10 @@ def build_state() -> dict:
         home["elo"], away["elo"] = update_elo(
             home["elo"], away["elo"], tuple(m["score"]),
             home.get("host", False), away.get("host", False))
-        db.log_elo_change(m["match"], [
-            (m["home"], elo_h_before, home["elo"]),
-            (m["away"], elo_a_before, away["elo"])])
+        if write_side_effects:
+            db.log_elo_change(m["match"], [
+                (m["home"], elo_h_before, home["elo"]),
+                (m["away"], elo_a_before, away["elo"])])
 
         # 开放度随实际总进球微调（场面比预期开放 → 双方 open 上浮）
         lam_h, lam_a_ = pred["lambdas"]
@@ -150,34 +267,45 @@ def build_state() -> dict:
             # 已开球但比分未入库：滚球/赛后盘口严禁覆盖赛前锁档
             lk = locked.get(str(m["match"]))
             if lk:
-                we_overrides[(m["home"], m["away"])] = lk["we"]
+                we_overrides[(m["home"], m["away"])] = lock_prediction_override(lk)
             continue
         mkt = h2h.get(f"{m['home']}|{m['away']}")
         fa = fable_adj.get(m["match"])
         if mkt or fa:
             home, away = by_code[m["home"]], by_code[m["away"]]
-            we_model = win_expectancy(effective_elo(home), effective_elo(away))
-            # Claude Code 主观微调：情报驱动的有界扰动——先调引擎，再融市场，
-            # 市场权重天然制衡；无微调的基线值同存，赛后双线对账
-            we_adj = (min(max(we_model + fa["delta"] / 100.0, 0.05), 0.95)
-                      if fa else we_model)
-            if mkt:
-                we_mkt = mkt["p_home"] + 0.5 * mkt["p_draw"]
-                we_blend = round(MODEL_WEIGHT * we_adj
-                                 + (1 - MODEL_WEIGHT) * we_mkt, 4)
-                we_base = round(MODEL_WEIGHT * we_model
-                                + (1 - MODEL_WEIGHT) * we_mkt, 4)
+            pred_model = match_probabilities(home, away,
+                                             knockout=m["stage"] != "group")
+            model_probs = _probs_from_pred(pred_model)
+            model_total = sum(pred_model["lambdas"])
+            adj_probs, adj_total = _apply_adjust(model_probs, model_total, fa)
+            mkt_probs = _market_probs(mkt)
+            probs_blend = _blend_probs(adj_probs, mkt_probs)
+            probs_base = _blend_probs(_round_probs(model_probs), mkt_probs)
+            if mkt and mkt.get("total_goals") is not None:
+                total_blend = round(MODEL_WEIGHT * adj_total
+                                    + (1 - MODEL_WEIGHT) * mkt["total_goals"], 3)
+                total_base = round(MODEL_WEIGHT * round(model_total, 3)
+                                   + (1 - MODEL_WEIGHT) * mkt["total_goals"], 3)
             else:
-                we_blend, we_base = round(we_adj, 4), round(we_model, 4)
-            fable = ({"delta": fa["delta"], "note": fa["note"]} if fa else None)
+                total_blend = adj_total
+                total_base = round(model_total, 3)
+            we_blend = round(_we_from_probs(probs_blend), 4)
+            we_base = round(_we_from_probs(probs_base), 4)
+            fable = ({"delta": fa.get("delta", 0), "draw": fa.get("draw", 0),
+                      "total": fa.get("total", 0), "note": fa["note"]}
+                     if fa else None)
             locked[str(m["match"])] = {
                 "we": we_blend, "we_base": we_base, "market": mkt,
+                "probs": probs_blend, "probs_base": probs_base,
+                "total_goals": total_blend, "total_goals_base": total_base,
                 "fable": fable, "ts": time.strftime("%Y-%m-%d %H:%M"),
             }
-            db.save_lock(m["match"], we_blend, mkt, we_base, fable)
+            if write_side_effects:
+                db.save_lock(m["match"], we_blend, mkt, we_base, fable,
+                             probs_blend, probs_base, total_blend, total_base)
         lk = locked.get(str(m["match"]))
         if lk:
-            we_overrides[(m["home"], m["away"])] = lk["we"]
+            we_overrides[(m["home"], m["away"])] = lock_prediction_override(lk)
 
     # ---- 条件模拟所需的固定结果 ----
     group_results = {(m["home"], m["away"]): tuple(m["score"])
@@ -233,6 +361,7 @@ def build_state() -> dict:
             "n": n,
             "outcome_acc": round(n_outcome_hit / n, 4) if n else None,
             "score_acc": round(n_score_hit / n, 4) if n else None,
+            "top3_score_acc": round(n_top3_score_hit / n, 4) if n else None,
             "brier": round(brier_sum / n, 4) if n else None,
             "brier_base": round(brier_base_sum / n, 4) if n else None,
             "n_adjusted": n_adjusted,

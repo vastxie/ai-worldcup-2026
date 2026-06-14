@@ -12,7 +12,7 @@ fixed = {
     "group_results": {(home_code, away_code): (gh, ga)},   # 已赛小组赛
     "ko_teams":      {match_no: (home_code, away_code)},   # 已确定的淘汰赛对阵
     "ko_winners":    {match_no: winner_code},              # 已赛淘汰赛胜者
-    "we_overrides":  {(home_code, away_code): we},         # 市场赔率融合后的胜负期望
+    "we_overrides":  {(home_code, away_code): override},   # 兼容 float we 或完整概率对象
 }
 """
 
@@ -58,8 +58,27 @@ THIRD_PLACE_SLOTS = {m: set(spec.split(":")[1])
                      if spec.startswith("3:")}
 
 
-def _we_lookup(overrides: dict | None, team_a: dict, team_b: dict) -> float | None:
-    """查找对阵的市场融合胜负期望（自动处理主客方向）。"""
+def _reverse_override(override):
+    if not isinstance(override, dict):
+        return 1.0 - override if override is not None else None
+    out = dict(override)
+    ph = override.get("p_home")
+    pa = override.get("p_away")
+    if ph is not None and pa is not None:
+        out["p_home"], out["p_away"] = pa, ph
+    if "probs" in override and isinstance(override["probs"], dict):
+        probs = dict(override["probs"])
+        probs["p_home"], probs["p_away"] = probs.get("p_away"), probs.get("p_home")
+        out["probs"] = probs
+    if override.get("we") is not None:
+        out["we"] = 1.0 - override["we"]
+    elif out.get("p_home") is not None and out.get("p_draw") is not None:
+        out["we"] = out["p_home"] + 0.5 * out["p_draw"]
+    return out
+
+
+def _we_lookup(overrides: dict | None, team_a: dict, team_b: dict):
+    """查找对阵的预测 override（自动处理主客方向）。"""
     if not overrides:
         return None
     key = (team_a["code"], team_b["code"])
@@ -67,7 +86,7 @@ def _we_lookup(overrides: dict | None, team_a: dict, team_b: dict) -> float | No
         return overrides[key]
     rkey = (team_b["code"], team_a["code"])
     if rkey in overrides:
-        return 1.0 - overrides[rkey]
+        return _reverse_override(overrides[rkey])
     return None
 
 

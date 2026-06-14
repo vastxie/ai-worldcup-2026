@@ -18,7 +18,7 @@
   }
 其中 model 指向 gateway.models 的 id。
 
-运行（调度器入口，cron 每天开球窗口前调用）：
+运行（兼容入口；统一自主行动优先用 python3 -m src.agent_session）：
   python3 -m src.agents            # 唤醒全部 agent
   python3 -m src.agents --only claude-bettor
 """
@@ -93,6 +93,16 @@ def _public_data() -> dict:
     name = {t["code"]: t["name_zh"] for t in payload["teams"]}
     now = datetime.now(timezone.utc)
 
+    def advisor_note(fable: dict) -> str:
+        bits = []
+        if fable.get("delta"):
+            bits.append(f"主客{fable['delta']:+g}pp")
+        if fable.get("draw"):
+            bits.append(f"平局{fable['draw']:+g}pp")
+        if fable.get("total"):
+            bits.append(f"总球{fable['total']:+g}")
+        return f"{' / '.join(bits) or '微调'} · {fable.get('note', '')}"
+
     upcoming = []
     for m in payload["schedule"]:
         p = m.get("pred")
@@ -112,9 +122,8 @@ def _public_data() -> dict:
                     "D": round(1 / max(p["p_draw"], 0.02), 2),
                     "A": round(1 / max(p["p_away"], 0.02), 2)},
             "市场盘口": p.get("market"),
-            # Claude Code 微调透明公示：选手可选择跟随或反向
-            "Claude Code微调": (f"{p['fable']['delta']:+g}百分点(主队向)·{p['fable']['note']}"
-                               if p.get("fable") else None),
+            # Codex 微调透明公示：选手可选择跟随或反向
+            "Codex微调": (advisor_note(p["fable"]) if p.get("fable") else None),
             "看点": None,
         })
     blurbs = db.load_blurbs()
