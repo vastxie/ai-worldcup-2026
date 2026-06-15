@@ -403,6 +403,167 @@
     border-left: 2px solid rgba(255, 215, 94, .5); padding: 2px 0 2px 12px; margin-bottom: 14px; }
   .md-blurb b { font-family: var(--mono); font-size: 11px; color: var(--gold);
     letter-spacing: .12em; margin-right: 6px; font-weight: 600; }
+  .md-action-row { display: flex; align-items: center; justify-content: flex-end; margin-bottom: 12px; }
+  .match-share-btn { display: inline-flex; align-items: center; gap: 7px;
+    font-family: var(--mono); font-size: 11px; color: var(--lime);
+    border: 1px solid var(--line-strong); background: rgba(184,245,61,.045);
+    border-radius: 2px; padding: 6px 10px; cursor: pointer; }
+  .match-share-btn:hover { border-color: var(--lime); background: rgba(184,245,61,.09); }
+  .match-share-btn svg { width: 14px; height: 14px; }
+
+  /* ---- 单场分享海报（小红书封面版） ---- */
+  .poster-modal { position: fixed; inset: 0; z-index: 80; background: rgba(3,8,5,.82);
+    backdrop-filter: blur(12px); display: flex; align-items: center; justify-content: center;
+    padding: 18px; }
+  .poster-panel { width: min(100%, 940px); max-height: calc(100vh - 36px);
+    overflow: auto; }
+  .poster-toolbar { display: flex; justify-content: flex-end; align-items: center; gap: 10px;
+    margin-bottom: 10px; }
+  .poster-tool { font-family: var(--mono); font-size: 11px; color: var(--dim);
+    border: 1px solid var(--line-strong); background: rgba(12,24,17,.86);
+    border-radius: 2px; padding: 7px 12px; cursor: pointer; }
+  .poster-tool:hover { color: var(--lime); border-color: var(--lime); }
+  .poster-tool.primary { color: var(--bg); background: var(--lime); border-color: var(--lime); font-weight: 600; }
+  .poster-stage { display: flex; justify-content: center; }
+
+  .match-poster { position: relative; width: 900px; height: 1200px; overflow: hidden;
+    color: var(--ink);
+    background:
+      radial-gradient(720px 420px at 18% 4%, rgba(184,245,61,.10), transparent 58%),
+      radial-gradient(620px 360px at 86% 12%, rgba(255,215,94,.07), transparent 62%),
+      radial-gradient(900px 700px at 50% 120%, rgba(127,179,36,.10), transparent 60%),
+      linear-gradient(160deg, #0a1510 0%, #07100b 52%, #050c08 100%);
+    border-radius: 6px;
+    padding: 0 64px;
+    display: flex; flex-direction: column;
+    box-shadow: 0 30px 80px rgba(0,0,0,.55); }
+  /* 顶部金线点缀 */
+  .match-poster::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 4px;
+    background: linear-gradient(90deg, transparent, var(--lime) 30%, var(--lime-dark) 70%, transparent);
+    opacity: .85; pointer-events: none; }
+  .match-poster > * { position: relative; z-index: 1; }
+
+  /* 顶部细带 */
+  .mp-top { display: flex; align-items: center; justify-content: space-between; gap: 20px;
+    padding-top: 40px; }
+  .mp-brand { display: inline-flex; align-items: center; gap: 12px; font-family: var(--mono);
+    font-size: 14px; letter-spacing: .22em; color: var(--dim); }
+  .mp-brand b { color: #06120a; background: var(--lime); padding: 4px 9px; border-radius: 2px; font-weight: 700; }
+  .mp-meta { font-family: var(--mono); font-size: 14px; color: var(--dim);
+    letter-spacing: .04em; text-align: right; line-height: 1.6;
+    display: flex; flex-direction: column; align-items: flex-end; }
+  .mp-meta b { color: var(--ink); font-weight: 600; }
+  .mp-meta span { white-space: nowrap; }
+
+  /* 视觉中心：巨型对决（下压，视觉重心偏低更稳）*/
+  .mp-versus { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+    gap: 28px; margin-top: 110px; }
+  .mp-side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .mp-side.right { align-items: flex-end; }
+  .mp-flag { font-size: 76px; line-height: 1; filter: drop-shadow(0 6px 18px rgba(0,0,0,.4)); }
+  .mp-name { font-weight: 900; font-size: 60px; line-height: 1; color: var(--ink);
+    letter-spacing: .02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mp-fifa { font-family: var(--mono); font-size: 13px; color: var(--faint); letter-spacing: .3em; }
+  .mp-center { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .mp-center .mp-vs { font-family: var(--mono); font-weight: 600; font-size: 92px; line-height: .9;
+    color: var(--ink); letter-spacing: .04em; text-shadow: 0 0 40px rgba(184,245,61,.25); }
+  .mp-center .mp-vs.is-score { color: var(--lime); }
+  .mp-center .mp-pred { font-family: var(--mono); font-size: 16px; letter-spacing: .18em;
+    color: var(--lime); border-top: 1px solid rgba(184,245,61,.4);
+    border-bottom: 1px solid rgba(184,245,61,.4); padding: 6px 14px; margin-top: 6px; }
+  .mp-center .mp-pred b { font-weight: 700; font-size: 19px; }
+
+  /* 分隔线 */
+  .mp-rule { margin: 64px 0 34px; height: 1px;
+    background: linear-gradient(90deg, transparent, var(--line-strong) 20%, var(--line-strong) 80%, transparent); }
+
+  /* 胜率条 */
+  .mp-prob-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px; }
+  .mp-prob-label { font-family: var(--mono); font-size: 13px; letter-spacing: .22em; color: var(--faint); }
+  .mp-prob-side { display: flex; align-items: baseline; gap: 16px; }
+  .mp-prob-h { font-family: var(--mono); font-weight: 600; font-size: 26px; color: var(--lime); }
+  .mp-prob-h small { font-size: 14px; color: var(--dim); margin-left: 6px; letter-spacing: .12em; }
+  .mp-prob-rest { font-family: var(--mono); font-size: 14px; color: var(--dim); letter-spacing: .08em; }
+  .mp-bar { display: flex; height: 30px; border-radius: 6px; overflow: hidden;
+    background: rgba(214,255,222,.06); }
+  .mp-bar i { display: block; height: 100%; }
+  .mp-bar .h { background: var(--lime); }
+  .mp-bar .d { background: var(--draw); }
+  .mp-bar .a { background: var(--hot); }
+
+  /* 中间竖向叠的 Top3 预测比分：第1居中放大，第2/3 一上一下弱化 */
+  .mp-vs-stack { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .mp-vs-row { font-family: var(--mono); font-weight: 600; letter-spacing: .04em; }
+  .mp-vs-row.top { font-size: 76px; line-height: 1.02; color: var(--lime);
+    text-shadow: 0 0 40px rgba(184,245,61,.25); margin: 6px 0; }
+  .mp-vs-row.minor { font-size: 30px; line-height: 1.1; color: var(--faint); }
+  .mp-vs-row.minor:empty { display: none; }
+
+  /* AI 投票 */
+  .mp-votes { margin-top: 30px; display: flex; align-items: center; gap: 14px; }
+  .mp-avatars { display: flex; }
+  .mp-avatars .mp-avatar { width: 46px; height: 46px; border-radius: 50%; margin-left: -10px;
+    border: 2px solid var(--bg); display: flex; align-items: center; justify-content: center;
+    overflow: hidden; background: #0e1c14; }
+  .mp-avatars .mp-avatar:first-child { margin-left: 0; }
+  .mp-avatars .mp-avatar.pick-H { border-color: rgba(184,245,61,.7);
+    background: radial-gradient(circle at 30% 30%, #1c2e16, #0e1c14); }
+  .mp-avatars .mp-avatar.pick-D { border-color: rgba(135,166,144,.66); }
+  .mp-avatars .mp-avatar.pick-A { border-color: rgba(255,122,82,.7);
+    background: radial-gradient(circle at 30% 30%, #2a1612, #160c0a); }
+  .mp-avatars .mp-avatar svg, .mp-avatars .mp-avatar img { width: 100%; height: 100%; display: block; }
+  .mp-vote-text { font-family: var(--mono); font-size: 15px; color: var(--dim);
+    letter-spacing: .04em; line-height: 1.5; }
+  .mp-vote-text b { color: var(--ink); font-weight: 600; }
+
+  /* 一句话看点 */
+  .mp-take { margin-top: auto; position: relative; padding: 0 8px 0 64px; }
+  .mp-take::before { content: "\201C"; position: absolute; left: 0; top: -30px;
+    font-family: Georgia, serif; font-size: 120px; line-height: 1; color: var(--lime); opacity: .9; }
+  .mp-take p { margin: 0; font-weight: 700; font-size: 34px; line-height: 1.45; color: var(--ink); }
+  .mp-take p::after { content: "\201D"; font-family: Georgia, serif; color: var(--lime); margin-left: 4px; }
+
+  /* 底部 */
+  .mp-foot { margin-top: 44px; display: flex; align-items: flex-end; justify-content: space-between;
+    gap: 20px; padding-bottom: 44px; }
+  .mp-site { font-family: var(--mono); font-size: 16px; line-height: 1.7; color: var(--dim); }
+  .mp-site .mp-url { color: var(--lime); font-weight: 600; letter-spacing: .04em; }
+  .mp-site .mp-sub { font-size: 12px; color: var(--faint); letter-spacing: .1em; }
+  .mp-qr { width: 96px; height: 96px; border-radius: 4px; background: #fff; padding: 8px;
+    box-shadow: 0 0 0 1px rgba(255,255,255,.2); }
+  .mp-qr img { width: 100%; height: 100%; display: block; }
+
+  @media (max-width: 980px) {
+    .poster-panel { width: 100%; }
+    .match-poster { width: min(94vw, 900px); height: auto; aspect-ratio: 3 / 4; padding: 0 26px; }
+    .mp-top { padding-top: 22px; }
+    .mp-brand, .mp-meta { font-size: 10px; }
+    .mp-versus { margin-top: 32px; gap: 12px; grid-template-columns: 1fr auto 1fr; }
+    .mp-flag { font-size: 38px; }
+    .mp-name { font-size: 30px; }
+    .mp-fifa { font-size: 9px; }
+    .mp-center .mp-vs { font-size: 46px; }
+    .mp-center .mp-pred { font-size: 10px; padding: 4px 8px; }
+    .mp-center .mp-pred b { font-size: 12px; }
+    .mp-rule { margin: 30px 0 18px; }
+    .mp-prob-label { font-size: 9px; }
+    .mp-prob-h { font-size: 16px; }
+    .mp-prob-h small, .mp-prob-rest { font-size: 9px; }
+    .mp-bar { height: 18px; }
+    .mp-vs-stack { gap: 1px; }
+    .mp-vs-row.top { font-size: 40px; margin: 3px 0; }
+    .mp-vs-row.minor { font-size: 16px; }
+    .mp-votes { margin-top: 18px; gap: 8px; }
+    .mp-avatars .mp-avatar { width: 30px; height: 30px; }
+    .mp-vote-text { font-size: 11px; }
+    .mp-take { padding-left: 40px; }
+    .mp-take::before { font-size: 72px; top: -18px; }
+    .mp-take p { font-size: 18px; }
+    .mp-foot { margin-top: 26px; padding-bottom: 24px; }
+    .mp-site { font-size: 11px; }
+    .mp-site .mp-sub { font-size: 9px; }
+    .mp-qr { width: 60px; height: 60px; padding: 5px; }
+  }
 
   /* ---- 首页今日看点 ---- */
   .today-spotlight { margin: 0 0 46px; }
@@ -1463,7 +1624,15 @@
     heat += `</div></div>`;
 
     const blurb = (window.WC_BLURBS || {})[m.match];
-    let right = `<div>${blurb ? `<div class="md-blurb"><b>AI 怎么看</b>${esc(blurb)}</div>` : ""}<div class="md-title">最可能比分 TOP 5</div>`;
+    let right = `<div><div class="md-action-row">
+      <button class="match-share-btn" type="button" data-match="${m.match}" title="生成单场 3:4 分享图">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+          <line x1="8.6" y1="10.6" x2="15.4" y2="6.5"/><line x1="8.6" y1="13.4" x2="15.4" y2="17.5"/>
+        </svg>
+        分享预测
+      </button>
+    </div>${blurb ? `<div class="md-blurb"><b>AI 怎么看</b>${esc(blurb)}</div>` : ""}<div class="md-title">最可能比分 TOP 5</div>`;
     const maxT = p.top_scores[0].p;
     p.top_scores.forEach((t, i) => {
       right += `<div class="ts-row${i === 0 ? " hl" : ""}"><span>${t.score.join(" - ")}</span>
@@ -1910,6 +2079,192 @@
     function getAgentProfile(login, name) {
       if (!login) return null;
       return publicAgent(Object.assign({ login, name }, S.agentProfiles[login] || {}));
+    }
+
+    function matchAgentVotes(m) {
+      const latest = new Map();
+      (S.byMatch[m.match] || [])
+        .filter(b => b.kind === "agent" && b.login)
+        .forEach(b => latest.set(b.login, b));
+      const groups = { H: [], D: [], A: [] };
+      [...latest.values()].forEach(b => {
+        const k = betOutcomeKey(b);
+        (groups[k] || groups.D).push(b);
+      });
+      return groups;
+    }
+
+    function matchTakeaway(m) {
+      const blurb = String((window.WC_BLURBS || {})[m.match] || "").trim();
+      if (blurb) return blurb.length > 78 ? blurb.slice(0, 78) + "..." : blurb;
+      const p = m.pred || {};
+      const scores = likelyScoresLabel(p);
+      const pick = pickLabel(m, p) || "暂无明确方向";
+      if (m.score) {
+        return `赛前倾向 ${pick}，Top3 比分给到 ${scores || "暂无"}，实际 ${m.score.join("-")}。`;
+      }
+      return `${pick} 是模型第一倾向，可能比分集中在 ${scores || "待更新"}。`;
+    }
+
+    function buildMatchPoster(m) {
+      const p = m.pred || {};
+      const dt = new Date(String(m.date_utc || "").replace(" ", "T"));
+      const time = Number.isNaN(dt.getTime()) ? "" : dt.toLocaleString("zh-CN", {
+        month: "long", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit"
+      });
+      const stage = `${STAGE_NAME[m.stage] || ""}${m.group ? " · " + m.group + "组" : ""}${m.round ? " 第" + m.round + "轮" : ""}`;
+      // 顶部 meta：stage 与 time 各占一行，不折行
+      const stageMeta = `${stage ? `<span class="mp-stage-line"><b>${esc(stage)}</b></span>` : ""}${time ? `<span>${esc(time)}</span>` : ""}`;
+
+      // Top3 预测比分
+      const topScores = (p.top_scores || []).slice(0, 3)
+        .map(t => (t.score || []).join("-")).filter(Boolean);
+      if (!topScores.length && p.pred_score) topScores.push(p.pred_score.join("-"));
+
+      // 中间视觉中心：已赛出分用大实际比分；未赛 Top3 竖向排列，第1居中、第2在上、第3在下
+      const center = m.score
+        ? `<div class="mp-vs is-score">${m.score[0]}:${m.score[1]}</div><div class="mp-pred">终场</div>`
+        : topScores.length >= 2
+          ? `<div class="mp-vs-stack">
+              <span class="mp-vs-row minor">${esc(topScores[1].replace("-", ":"))}</span>
+              <span class="mp-vs-row top">${esc(topScores[0].replace("-", ":"))}</span>
+              <span class="mp-vs-row minor">${esc(topScores[2] ? topScores[2].replace("-", ":") : "")}</span>
+            </div><div class="mp-pred">预测比分</div>`
+          : topScores.length === 1
+            ? `<div class="mp-vs is-score">${esc(topScores[0].replace("-", ":"))}</div><div class="mp-pred">预测比分</div>`
+            : `<div class="mp-vs">VS</div>`;
+
+      // 胜率条：三段平直色块（与主页 obar 一致）
+      const ph = p.p_home || 0, pd = p.p_draw || 0, pa = p.p_away || 0;
+      const probBlock = (ph || pd || pa) ? `
+        <div class="mp-prob-head">
+          <span class="mp-prob-label">AI 胜率预测</span>
+          <span class="mp-prob-side">
+            <span class="mp-prob-h">${pct(ph, 0)}<small>主胜</small></span>
+            <span class="mp-prob-rest">平 ${pct(pd, 0)} · 客胜 ${pct(pa, 0)}</span>
+          </span>
+        </div>
+        <div class="mp-bar">
+          <i class="h" style="width:${ph * 100}%"></i>
+          <i class="d" style="width:${pd * 100}%"></i>
+          <i class="a" style="width:${pa * 100}%"></i>
+        </div>` : "";
+
+      // AI 投票：横排头像 + 一句话总结
+      const votes = matchAgentVotes(m);
+      const avatar = (b, k) => {
+        const a = publicAgent(b);
+        const name = a.name || a.login || "?";
+        const icon = (window.aiIcon ? window.aiIcon(a.model || a.login) : null) || "AI";
+        return `<span class="mp-avatar pick-${k}" title="${esc(name)}">${icon}</span>`;
+      };
+      const voteTotal = votes.H.length + votes.D.length + votes.A.length;
+      const voteAvatars = ["H", "D", "A"]
+        .flatMap(k => votes[k].map(b => avatar(b, k)))
+        .join("");
+      const voteSummary = (() => {
+        if (!voteTotal) return "暂无 AI 投票";
+        const top = [["H", votes.H.length, "主胜"], ["D", votes.D.length, "平"], ["A", votes.A.length, "客胜"]]
+          .sort((a, b) => b[1] - a[1])[0];
+        return `<b>${voteTotal}</b> 个 AI 投票 · <b>${top[1]}</b> 看好${top[2]}`;
+      })();
+      const voteBlock = voteAvatars ? `
+        <div class="mp-votes">
+          <div class="mp-avatars">${voteAvatars}</div>
+          <div class="mp-vote-text">${voteSummary}</div>
+        </div>` : "";
+
+      const take = matchTakeaway(m);
+      const takeBlock = take ? `<div class="mp-take"><p>${esc(take)}</p></div>` : "";
+      const qrImg = window.WC_QR_DATA ? `<img src="${window.WC_QR_DATA}" alt="二维码">` : "";
+
+      return `<div class="match-poster" data-poster-match="${m.match}">
+        <div class="mp-top">
+          <div class="mp-brand"><b>AI</b><span>WORLDCUP · 2026</span></div>
+          <div class="mp-meta">${stageMeta}</div>
+        </div>
+        <div class="mp-versus">
+          <div class="mp-side">
+            <span class="mp-flag">${FLAG[m.home] || ""}</span>
+            <div class="mp-name">${esc(zh(m.home))}</div>
+          </div>
+          <div class="mp-center">${center}</div>
+          <div class="mp-side right">
+            <span class="mp-flag">${FLAG[m.away] || ""}</span>
+            <div class="mp-name">${esc(zh(m.away))}</div>
+          </div>
+        </div>
+        <div class="mp-rule"></div>
+        ${probBlock}
+        ${voteBlock}
+        ${takeBlock}
+        <div class="mp-foot">
+          <div class="mp-site">
+            <div class="mp-url">worldcup.lightai.io</div>
+            <div class="mp-sub">看全部 AI 预测与投注</div>
+          </div>
+          <div class="mp-qr">${qrImg}</div>
+        </div>
+      </div>`;
+    }
+
+    function ensurePosterModal() {
+      let modal = document.querySelector(".poster-modal");
+      if (modal) return modal;
+      modal = document.createElement("div");
+      modal.className = "poster-modal";
+      modal.hidden = true;
+      modal.innerHTML = `<div class="poster-panel">
+        <div class="poster-toolbar">
+          <button class="poster-tool primary" type="button" data-poster-download>下载图片</button>
+          <button class="poster-tool" type="button" data-poster-close>关闭</button>
+        </div>
+        <div class="poster-stage"></div>
+      </div>`;
+      document.body.appendChild(modal);
+      modal.addEventListener("click", e => {
+        if (e.target === modal || e.target.closest("[data-poster-close]")) {
+          modal.hidden = true;
+        }
+      });
+      modal.querySelector("[data-poster-download]").addEventListener("click", async e => {
+        e.preventDefault();
+        const poster = modal.querySelector(".match-poster");
+        if (!poster) return;
+        const no = poster.dataset.posterMatch || "match";
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        btn.textContent = "生成中...";
+        try {
+          if (!window.html2canvas) {
+            await new Promise((res, rej) => {
+              const s = document.createElement("script");
+              s.src = "html2canvas.min.js";
+              s.onload = res;
+              s.onerror = () => rej(new Error("脚本加载失败"));
+              document.head.appendChild(s);
+            });
+          }
+          const canvas = await html2canvas(poster, { backgroundColor: "#07100b", scale: 1080 / poster.getBoundingClientRect().width, useCORS: true });
+          const a = document.createElement("a");
+          a.download = `ai-worldcup-match-${no}.png`;
+          a.href = canvas.toDataURL("image/png");
+          a.click();
+        } catch (err) {
+          alert("生成图片失败：" + (err && err.message || err));
+        }
+        btn.disabled = false;
+        btn.textContent = "下载图片";
+      });
+      return modal;
+    }
+
+    function shareMatchPoster(no) {
+      const m = byMatch[+no];
+      if (!m || !m.pred) return;
+      const modal = ensurePosterModal();
+      modal.querySelector(".poster-stage").innerHTML = buildMatchPoster(m);
+      modal.hidden = false;
     }
 
     function compactPersona(p, model) {
@@ -2648,8 +3003,14 @@
     }
 
     function enhanceDetail(det, m) {
-      if (!S.on) return;
-      betSection(det, m);
+      det.querySelectorAll(".match-share-btn").forEach(btn => {
+        btn.addEventListener("click", e => {
+          e.preventDefault();
+          e.stopPropagation();
+          shareMatchPoster(btn.dataset.match || m.match);
+        });
+      });
+      if (S.on) betSection(det, m);
     }
 
     async function renderRank() {
@@ -2716,6 +3077,7 @@
     const btn = document.getElementById("share-btn");
     // 固定二维码（指向 worldcup.lightai.io），内嵌避免依赖外部 CDN
     const qrData = "data:image/gif;base64,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";
+    window.WC_QR_DATA = qrData;
     const loadScript = src => new Promise((res, rej) => {
       const s = document.createElement("script");
       s.src = src; s.onload = res; s.onerror = () => rej(new Error("脚本加载失败"));
