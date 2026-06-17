@@ -9,6 +9,7 @@ data/intl_results.csv
 web/data.js
 web/reports.js
 web/blurbs.js
+web/intel.js
 out/
 
 # 本地杂项

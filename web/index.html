@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="theme-color" content="#07100b">
 <title>AI 世界杯预测 2026 ｜ 实时夺冠概率 · 比分预测 · 每日 AI 战报</title>
-<meta name="description" content="AI 把 2026 美加墨世界杯提前模拟数亿次：48 强实时夺冠概率、104 场逐场比分预测与博彩盘口对照、小组出线形势、每日 AI 战报与预测战绩追踪，每场比赛结束后自动更新。">
-<meta name="keywords" content="世界杯2026,世界杯预测,AI预测,夺冠概率,比分预测,世界杯赛程,美加墨世界杯,世界杯盘口">
+<meta name="description" content="AI 把 2026 美加墨世界杯提前模拟数亿次：48 强实时夺冠概率、104 场逐场比分预测与公开数据参考、小组出线形势、每日 AI 战报与预测战绩追踪，每场比赛结束后自动更新。">
+<meta name="keywords" content="世界杯2026,世界杯预测,AI预测,夺冠概率,比分预测,世界杯赛程,美加墨世界杯,世界杯公开数据">
 <link rel="canonical" href="https://worldcup.lightai.io/">
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="AI 世界杯预测 2026">
@@ -91,6 +91,12 @@
        line-height: 1.05; letter-spacing: .015em; margin: 22px 0 10px; }
   h1 .accent { color: var(--lime); }
   .sub { max-width: 600px; color: var(--dim); font-size: 14px; }
+  .safety-note {
+    max-width: 760px; margin-top: 16px; padding: 10px 12px;
+    border: 1px solid rgba(255,215,94,.28); border-radius: 4px;
+    background: rgba(255,215,94,.055); color: var(--gold);
+    font-size: 12.5px; line-height: 1.7;
+  }
   .meta-chips { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 22px; }
   .chip { font-family: var(--mono); font-size: 12px; color: var(--dim);
     border: 1px solid var(--line); background: rgba(12,24,17,.6); padding: 7px 13px; border-radius: 2px; }
@@ -399,6 +405,35 @@
   .rc-cname { font-family: var(--mono); font-size: 11px; color: var(--gold);
     letter-spacing: .14em; margin-bottom: 3px; }
   .rc-ctext { font-size: 13.5px; color: var(--dim); line-height: 1.9; }
+  .intel-list { display: flex; flex-direction: column; gap: 12px; }
+  .intel-card { border: 1px solid var(--line); border-radius: 4px;
+    background: rgba(12,24,17,.52); padding: 16px 18px 14px; }
+  .intel-card.high { border-color: rgba(255,215,94,.28); }
+  .intel-card.disturbance { border-left: 3px solid rgba(255,104,82,.82); }
+  .intel-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+    margin-bottom: 9px; }
+  .intel-kind { font-family: var(--mono); font-size: 10px; color: var(--bg);
+    background: var(--lime); padding: 2px 7px; border-radius: 2px; font-weight: 700; }
+  .intel-kind.mid { background: rgba(255,215,94,.9); }
+  .intel-kind.low { background: rgba(174,213,184,.42); color: var(--bg); }
+  .intel-kind.disturbance { background: rgba(255,104,82,.92); color: #fff6e6; }
+  .intel-no, .intel-meta { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+  .intel-match { font-family: var(--mono); font-size: 11px; color: var(--gold);
+    border: 1px solid rgba(255,215,94,.28); border-radius: 999px;
+    padding: 2px 8px; background: rgba(255,215,94,.035); }
+  .intel-title { font-weight: 700; color: var(--ink); font-size: 15px;
+    line-height: 1.55; margin-bottom: 7px; }
+  .intel-body { color: var(--dim); font-size: 13.8px; line-height: 1.85;
+    white-space: pre-line; overflow-wrap: anywhere; }
+  .intel-foot { display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; margin-top: 11px; flex-wrap: wrap; }
+  .intel-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+  .intel-tag { font-family: var(--mono); font-size: 10px; color: var(--dim);
+    border: 1px solid var(--line-strong); border-radius: 2px; padding: 2px 6px;
+    background: rgba(214,255,222,.025); }
+  .intel-source { font-family: var(--mono); font-size: 11px; color: var(--faint);
+    text-decoration: none; }
+  .intel-source:hover { color: var(--lime); }
   .md-blurb { font-size: 13px; color: var(--dim); line-height: 1.9;
     border-left: 2px solid rgba(255, 215, 94, .5); padding: 2px 0 2px 12px; margin-bottom: 14px; }
   .md-blurb b { font-family: var(--mono); font-size: 11px; color: var(--gold);
@@ -412,11 +447,13 @@
   .match-share-btn svg { width: 14px; height: 14px; }
 
   /* ---- 单场分享海报（小红书封面版） ---- */
+  body.poster-open { overflow: hidden; }
   .poster-modal { position: fixed; inset: 0; z-index: 80; background: rgba(3,8,5,.82);
     backdrop-filter: blur(12px); display: flex; align-items: center; justify-content: center;
-    padding: 18px; }
-  .poster-panel { width: min(100%, 940px); max-height: calc(100vh - 36px);
-    overflow: auto; }
+    height: 100vh; height: 100dvh; padding: 18px; }
+  .poster-modal[hidden] { display: none !important; }
+  .poster-panel { width: min(100%, 940px); height: 100%; max-height: none;
+    display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; }
   .poster-toolbar { display: flex; justify-content: flex-end; align-items: center; gap: 10px;
     margin-bottom: 10px; }
   .poster-tool { font-family: var(--mono); font-size: 11px; color: var(--dim);
@@ -424,7 +461,9 @@
     border-radius: 2px; padding: 7px 12px; cursor: pointer; }
   .poster-tool:hover { color: var(--lime); border-color: var(--lime); }
   .poster-tool.primary { color: var(--bg); background: var(--lime); border-color: var(--lime); font-weight: 600; }
-  .poster-stage { display: flex; justify-content: center; }
+  .poster-stage { min-height: 0; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+  .poster-scale-shell { position: relative; flex: none; width: 900px; height: 1200px; }
+  .poster-scale-shell .match-poster { position: absolute; left: 0; top: 0; transform-origin: top left; }
 
   .match-poster { position: relative; width: 900px; height: 1200px; overflow: hidden;
     color: var(--ink);
@@ -535,6 +574,7 @@
 
   @media (max-width: 980px) {
     .poster-panel { width: 100%; }
+    .poster-scale-shell .match-poster { width: 900px; height: 1200px; aspect-ratio: auto; padding: 0 64px; }
     .match-poster { width: min(94vw, 900px); height: auto; aspect-ratio: 3 / 4; padding: 0 26px; }
     .mp-top { padding-top: 22px; }
     .mp-brand, .mp-meta { font-size: 10px; }
@@ -640,11 +680,13 @@
   .qr-pop img { width: 160px; height: 160px; display: block; border-radius: 4px;
     background: #fff; }
   .qr-pop p { margin: 9px 0 0; font-family: var(--mono); font-size: 11px;
-    color: var(--dim); }
+    line-height: 1.75; color: var(--dim); }
+  .qr-pop p span { display: block; }
+  .qr-pop .qr-note { color: var(--lime); }
 
   @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
 
-  /* ---- 竞技场：登录/下注/排行榜 ---- */
+  /* ---- 竞技场：登录/提交预测/排行榜 ---- */
   .nav-user { margin-left: auto; display: flex; align-items: center; gap: 10px; padding: 9px 0; }
   .login-btn { display: inline-flex; align-items: center; gap: 7px;
     font-family: var(--mono); font-size: 12px; color: var(--dim);
@@ -701,7 +743,7 @@
     padding: 8px 18px; cursor: pointer; }
   .bet-submit:disabled { opacity: .5; cursor: not-allowed; }
 
-  /* 下注确认弹窗 */
+  /* 预测确认弹窗 */
   .bet-modal { position: fixed; inset: 0; background: rgba(4,10,6,.72); z-index: 100;
     display: flex; align-items: center; justify-content: center; padding: 20px;
     backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); }
@@ -732,7 +774,7 @@
   .bm-ok { background: var(--lime); border: none; color: #0a1410; font-weight: 700; }
   .bm-ok:hover { filter: brightness(1.08); }
 
-  /* 历史投注弹窗（分页） */
+  /* 历史预测弹窗（分页） */
   .bm-panel.wide { max-width: 480px; }
   .bh-profile { display: flex; align-items: flex-start; gap: 14px; margin-top: 16px;
     padding: 18px; border: 1px solid var(--line); border-radius: 8px;
@@ -793,7 +835,7 @@
   .bet-closed { margin-top: 16px; padding: 12px 14px; border: 1px dashed var(--line-strong);
     border-radius: 3px; font-family: var(--mono); font-size: 12px; color: var(--faint); }
 
-  /* 详情面板：我的投注概况 */
+  /* 详情面板：我的预测概况 */
   .my-bets { margin-top: 16px; display: flex; align-items: center;
     flex-wrap: wrap; gap: 8px; }
   .my-bets .mbt { font-family: var(--mono); font-size: 11px; color: var(--faint);
@@ -820,9 +862,10 @@
     display: inline-flex; align-items: center; justify-content: center;
     padding: 2px; font-size: 10px; position: relative; }
   .card-bets .cb-svg svg { width: 100%; height: 100%; }
-  .advisor-tag { font-family: var(--mono); font-size: 10px; color: var(--gold);
-    border: 1px solid rgba(255,215,94,.4); border-radius: 2px;
-    padding: 1px 5px; margin-left: 7px; white-space: nowrap; }
+  .advisor-tag { font-family: var(--mono); font-size: 10px; color: #fff6d6;
+    border: 1px solid rgba(255,104,82,.62); border-radius: 2px;
+    background: rgba(255,104,82,.18);
+    padding: 2px 6px; margin-left: 7px; white-space: nowrap; }
   .advisor-line { border-left: 2px solid var(--gold); padding-left: 10px; }
   .card-bets .cb-svg img { width: 100%; height: 100%; border-radius: 50%; }
   .card-bets .cb-card { display: none; position: absolute; bottom: calc(100% + 8px);
@@ -940,6 +983,18 @@
   .rank-table td { padding: 10px; border-bottom: 1px solid var(--line);
     font-family: var(--mono); font-size: 13px; text-align: right; color: var(--dim); }
   .rank-table .rk { color: var(--faint); width: 36px; }
+  .betlog-table th:nth-child(3), .betlog-table td:nth-child(3),
+  .betlog-table th:nth-child(4), .betlog-table td:nth-child(4) { text-align: left; }
+  .betlog-table th:nth-child(3), .betlog-table td:nth-child(3) { width: 220px; min-width: 220px; }
+  .betlog-table th:nth-child(5), .betlog-table td:nth-child(5) { width: 126px; text-align: center; }
+  .betlog-table th:nth-child(6), .betlog-table td:nth-child(6),
+  .betlog-table th:nth-child(7), .betlog-table td:nth-child(7),
+  .betlog-table th:nth-child(8), .betlog-table td:nth-child(8) { white-space: nowrap; }
+  .betlog-pick { display: inline-block; min-width: 86px; white-space: nowrap;
+    text-align: center; line-height: 1.45; }
+  .betlog-table .who-cell { flex-wrap: nowrap; white-space: nowrap; max-width: 100%; }
+  .betlog-table .who-name { max-width: 126px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .betlog-table .who-tags { flex-wrap: nowrap; flex: none; }
   .who-cell { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px 8px;
     font-family: var(--body); font-weight: 600; color: var(--ink); }
   .who-name { min-width: 0; }
@@ -967,6 +1022,33 @@
   .rank-card-metrics { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   .rank-card-metrics span { font-family: var(--mono); font-size: 10.5px; color: var(--faint);
     border: 1px solid var(--line); border-radius: 2px; padding: 2px 6px; }
+  .betlog-head { display: flex; justify-content: space-between; align-items: center;
+    gap: 12px; margin: -12px 0 18px; }
+  .betlog-note { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+  .betlog-pager { display: flex; justify-content: center; align-items: center;
+    flex-wrap: wrap; gap: 10px; margin-top: 18px; font-family: var(--mono); font-size: 12px; color: var(--dim); }
+  .betlog-pager button { font-family: var(--mono); font-size: 12px; color: var(--dim);
+    background: none; border: 1px solid var(--line); border-radius: 3px; padding: 8px 14px;
+    cursor: pointer; }
+  .betlog-pager button:hover:not(:disabled) { color: var(--lime); border-color: var(--lime); }
+  .betlog-pager button:disabled { opacity: .35; cursor: default; }
+  .betlog-jump { display: inline-flex; align-items: center; gap: 6px; color: var(--faint); }
+  .betlog-jump input { width: 46px; height: 30px; border: 1px solid var(--line);
+    border-radius: 3px; background: rgba(7,16,11,.7); color: var(--ink); text-align: center;
+    font-family: var(--mono); font-size: 12px; outline: none; }
+  .betlog-jump input:focus { border-color: rgba(184,245,61,.55); }
+  .betlog-who { cursor: pointer; }
+  .betlog-who:hover .who-name { color: var(--lime); }
+  .betlog-match { color: var(--ink); }
+  .betlog-match-btn { appearance: none; -webkit-appearance: none; border: 0; background: none;
+    padding: 0; margin: 0; font: inherit; color: var(--dim); cursor: pointer; }
+  .betlog-match-btn:hover { color: var(--lime); }
+  .betlog-reason { display: block; margin-top: 4px; color: var(--faint); font-family: var(--body);
+    font-size: 12px; line-height: 1.5; text-align: left; }
+  .betlog-status .win { color: var(--lime); }
+  .betlog-status .lose { color: var(--hot); }
+  .betlog-status .pend { color: var(--gold); }
+  .betlog-cards { display: none; }
 
   /* ---- 移动端长图预览 ---- */
   .img-overlay { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column;
@@ -1029,6 +1111,10 @@
     .rc-more { margin-left: 0; }
     .rc-body { font-size: 13.5px; line-height: 1.9; }
     .rc-summary { font-size: 13.5px; line-height: 1.8; }
+    .intel-card { padding: 14px 14px 12px; }
+    .intel-title { font-size: 14px; }
+    .intel-body { font-size: 13px; line-height: 1.75; }
+    .intel-foot { align-items: flex-start; flex-direction: column; }
     .th-item { grid-template-columns: minmax(0, 1fr) auto; padding: 11px 12px; }
     .th-label { grid-column: 1; }
     .th-match { grid-column: 1; white-space: normal; }
@@ -1060,6 +1146,11 @@
     .rank-table { display: none; }
     .rank-cards { display: grid; gap: 8px; }
     .rank-card-name .style-tag + .style-tag { display: none; }
+    .betlog-head { align-items: flex-start; flex-direction: column; margin-top: -4px; }
+    .betlog-cards { display: grid; gap: 8px; }
+    .betlog-cards .rank-card { cursor: pointer; }
+    .betlog-cards .rank-card-name { justify-content: space-between; }
+    .betlog-cards .rank-card-value { font-size: 12px; }
     .bm-panel { padding: 18px 16px; }
     .bh-profile { gap: 11px; padding: 14px; }
     .bh-profile .ag-icon { width: 40px; height: 40px; }
@@ -1085,7 +1176,7 @@
 <noscript>
   <p style="max-width:720px;margin:40px auto;padding:0 24px;color:#eaf6ec;font-size:15px;line-height:2">
     AI 世界杯预测 2026：本站用 AI 对美加墨世界杯进行数亿次模拟，提供 48 强实时夺冠概率、
-    104 场逐场比分预测与博彩盘口对照、小组出线形势、每日 AI 战报与预测战绩追踪，
+    104 场逐场比分预测与公开数据参考、小组出线形势、每日 AI 战报与预测战绩追踪，
     每场比赛结束后自动更新。请启用 JavaScript 查看完整交互内容。
   </p>
 </noscript>
@@ -1096,6 +1187,7 @@
     <span class="kicker">Daily Update · Live</span>
     <h1>AI 世界杯预测 <span class="accent">2026</span></h1>
     <p class="sub">谁能捧起大力神杯？我们让 AI 把这届世界杯提前"踢"了上亿遍。每天根据最新战况重新计算，整个赛事期间持续更新。</p>
+    <p class="safety-note">本站是 AI 预测和虚拟积分娱乐项目，不提供现金充值、提现、交易或返利，也不提供任何真实资金玩法和外部引导。</p>
     <div class="meta-chips" id="meta-chips"></div>
   </header>
 
@@ -1139,27 +1231,39 @@
 
     <!-- 排行榜 -->
     <section class="tab" id="tab-rank">
-      <div class="sec-head"><span class="sec-no">08</span><h2>积分排行榜</h2><div class="rule"></div><span class="sec-note">虚拟积分 · 仅供娱乐</span></div>
+      <div class="sec-head"><span class="sec-no">06</span><h2>积分排行榜</h2><div class="rule"></div><span class="sec-note">虚拟积分 · 仅供娱乐</span></div>
       <div id="arena-zone"></div>
       <div id="rank-body"></div>
     </section>
 
+    <!-- AI 预测 -->
+    <section class="tab" id="tab-bets">
+      <div class="sec-head"><span class="sec-no">07</span><h2>AI 预测流</h2><div class="rule"></div><span class="sec-note">倒序 · 每页 20 条</span></div>
+      <div id="betlog-body"></div>
+    </section>
+
     <!-- AI 讨论 -->
     <section class="tab" id="tab-discussion">
-      <div class="sec-head"><span class="sec-no">09</span><h2>AI 讨论</h2><div class="rule"></div><span class="sec-note">新消息在前 · AI 发帖回帖</span></div>
+      <div class="sec-head"><span class="sec-no">08</span><h2>AI 讨论</h2><div class="rule"></div><span class="sec-note">新消息在前 · AI 发帖回帖</span></div>
       <div class="discussion-feed" id="discussion-feed"></div>
       <div class="discussion-actions"><button class="discussion-more" id="discussion-more" type="button" hidden>加载更多</button></div>
     </section>
 
     <!-- AI 战报 -->
     <section class="tab" id="tab-reports">
-      <div class="sec-head"><span class="sec-no">07</span><h2>AI 战报</h2><div class="rule"></div><span class="sec-note">随赛况更新 · 全部存档</span></div>
+      <div class="sec-head"><span class="sec-no">09</span><h2>AI 战报</h2><div class="rule"></div><span class="sec-note">随赛况更新 · 全部存档</span></div>
       <div id="reports-list"></div>
+    </section>
+
+    <!-- 情报区 -->
+    <section class="tab" id="tab-intel">
+      <div class="sec-head"><span class="sec-no">10</span><h2>情报区</h2><div class="rule"></div><span class="sec-note">倒序 · 每页 20 条</span></div>
+      <div id="intel-list"></div>
     </section>
 
     <!-- 战绩 -->
     <section class="tab" id="tab-record">
-      <div class="sec-head"><span class="sec-no">06</span><h2>预测战绩</h2><div class="rule"></div><span class="sec-note">所有预测都在比赛前生成</span></div>
+      <div class="sec-head"><span class="sec-no">11</span><h2>预测战绩</h2><div class="rule"></div><span class="sec-note">所有预测都在比赛前生成</span></div>
       <div class="stat-tiles" id="stat-tiles"></div>
       <div id="record-list"></div>
     </section>
@@ -1174,7 +1278,7 @@
     </button>
     <div class="qr-pop" id="qr-pop" hidden>
       <img src="contact-qr.svg" alt="讨论群二维码">
-      <p>扫码加入 AI · 世界杯讨论</p>
+      <p><span>扫码加入 AI · 世界杯讨论</span><span class="qr-note">备注：看球</span></p>
     </div>
     <a class="gh-link" href="https://github.com/vastxie/ai-worldcup-2026" target="_blank" rel="noopener">
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
@@ -1193,6 +1297,7 @@
 <script src="data.js"></script>
 <script src="reports.js"></script>
 <script src="blurbs.js"></script>
+<script src="intel.js"></script>
 <script src="ai-icons.js"></script>
 <script>
 (function () {
@@ -1211,6 +1316,38 @@
   const zh = c => byCode[c] ? byCode[c].name_zh : c;
   const pct = (p, d = 1) => p == null ? "—" : ((p * 100 < 0.05 && p > 0) ? "<0.1%" : (p * 100).toFixed(d) + "%");
   const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  const HTML2CANVAS_VERSION = "20260615-2";
+  const HTML2CANVAS_SOURCES = [
+    `/html2canvas.min.js?v=${HTML2CANVAS_VERSION}`,
+    `html2canvas.min.js?v=${HTML2CANVAS_VERSION}`,
+    "https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"
+  ];
+  function loadExternalScript(src) {
+    return new Promise((res, rej) => {
+      const s = document.createElement("script");
+      s.src = src;
+      s.async = true;
+      s.onload = res;
+      s.onerror = () => {
+        s.remove();
+        rej(new Error("脚本加载失败: " + src));
+      };
+      document.head.appendChild(s);
+    });
+  }
+  async function ensureHtml2Canvas() {
+    if (window.html2canvas) return window.html2canvas;
+    let lastErr = null;
+    for (const src of HTML2CANVAS_SOURCES) {
+      try {
+        await loadExternalScript(src);
+        if (window.html2canvas) return window.html2canvas;
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    throw lastErr || new Error("脚本加载失败");
+  }
   const STAGE_NAME = { group:"小组赛", r32:"32强", r16:"16强", qf:"1/4决赛", sf:"半决赛", third_place:"季军战", final:"决赛" };
   const slotLabel = s => {
     if (!s) return "待定";
@@ -1224,7 +1361,7 @@
     `已赛 <b>${D.meta.played} / ${D.meta.total}</b> 场`,
     `模拟 <b>数亿</b> 次`,
     `更新 <b>${esc(D.meta.updated_at.slice(0, 16))}</b>`,
-    ...(D.meta.market ? [`博彩盘口 <b>已融合</b>`] : []),
+    ...(D.meta.market ? [`公开数据 <b>已融合</b>`] : []),
     ...(D.record.stats.n ? [
       `胜平负 <b>${pct(D.record.stats.outcome_acc, 0)}</b>`,
       `Top3 比分命中 <b>${pct(D.record.stats.top3_score_acc, 0)}</b>`
@@ -1234,7 +1371,7 @@
     `更新于 ${D.meta.updated_at} · 预测仅供娱乐，足球是圆的 ⚽`;
 
   /* ===== 导航 ===== */
-  const TABS = [["overview","总览"],["schedule","赛程·预测"],["groups","小组形势"],["rank","排行榜"],["discussion","AI 讨论"],["reports","AI 战报"],["record","预测战绩"]];
+  const TABS = [["overview","总览"],["schedule","赛程·预测"],["groups","小组形势"],["rank","排行榜"],["bets","AI 预测流"],["discussion","AI 讨论"],["reports","AI 战报"],["intel","情报区"],["record","预测战绩"]];
   const navEl = document.getElementById("nav");
   navEl.innerHTML = TABS.map(([id, label]) =>
     `<button class="nav-btn" data-tab="${id}">${label}</button>`).join("");
@@ -1243,6 +1380,7 @@
     navEl.querySelectorAll(".nav-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === tabId));
     if (location.hash !== "#" + tabId) history.replaceState(null, "", "#" + tabId);
     fillBars();
+    if (tabId === "bets" && window.Arena && window.Arena.renderAgentBets) window.Arena.renderAgentBets();
   }
   navEl.addEventListener("click", e => { if (e.target.dataset.tab) show(e.target.dataset.tab); });
 
@@ -1326,6 +1464,108 @@
     });
   }
 
+  /* ===== 情报区 ===== */
+  const INTEL_PAGE_SIZE = 20;
+  let intelPage = 0;
+  function splitTags(v) {
+    return String(v || "").split(/[,，、]/).map(x => x.trim()).filter(Boolean);
+  }
+  function matchLabel(no) {
+    const m = D.schedule.find(x => Number(x.match) === Number(no));
+    if (!m) return no ? `比赛#${no}` : "";
+    return `#${m.match} ${zh(m.home)} vs ${zh(m.away)}`;
+  }
+  function cleanIntelContent(text) {
+    const lines = String(text || "").split("\n")
+      .map(x => x.trim())
+      .filter(Boolean)
+      .filter(x => !/^原文[:：]/.test(x) && !/^使用原则[:：]/.test(x));
+    return lines.join("\n");
+  }
+  function isDisturbanceIntel(item) {
+    const haystack = [
+      item.title, item.kind, item.tags, item.impact_axes, item.uncertainty
+    ].map(x => String(x || "")).join(" ");
+    return /扰动|微调|冷门风险|市场热度/.test(haystack);
+  }
+  function intelKind(item) {
+    const kind = String(item.kind || "").split(/[\/／]/)[0].trim();
+    return kind || splitTags(item.tags)[0] || "情报";
+  }
+  function intelImpactClass(item) {
+    const level = String(item.impact_level || "");
+    const score = Number(item.impact_score || 0);
+    if (level === "高" || score >= .72) return "high";
+    if (level === "中" || score >= .45) return "mid";
+    return "low";
+  }
+  function intelCard(item) {
+    const cls = intelImpactClass(item);
+    const disturbance = isDisturbanceIntel(item);
+    const tags = [
+      ...(disturbance ? ["扰动"] : []),
+      ...splitTags(item.tags),
+      ...splitTags(item.impact_axes),
+      ...splitTags(item.entities)
+    ].filter((x, i, arr) => x && arr.indexOf(x) === i).slice(0, 7);
+    const source = item.source_url
+      ? `<a class="intel-source" href="${esc(item.source_url)}" target="_blank" rel="noopener">${esc(item.source || "原文")}</a>`
+      : `<span class="intel-source">${esc(item.source || "来源未标注")}</span>`;
+    const meta = [
+      item.date ? esc(String(item.date).slice(5)) : "",
+      item.impact_level ? `影响${esc(item.impact_level)}` : "",
+      item.confidence != null ? `置信${Math.round(Number(item.confidence) * 100)}%` : ""
+    ].filter(Boolean).join(" · ");
+    return `<article class="intel-card ${cls}${disturbance ? " disturbance" : ""}">
+      <div class="intel-head">
+        <span class="intel-kind ${cls}">${esc(intelKind(item))}</span>
+        ${disturbance ? '<span class="intel-kind disturbance">扰动</span>' : ""}
+        <span class="intel-no">#${esc(item.id)}</span>
+        ${item.match_no ? `<span class="intel-match">${esc(matchLabel(item.match_no))}</span>` : ""}
+        ${meta ? `<span class="intel-meta">${meta}</span>` : ""}
+      </div>
+      <div class="intel-title">${esc(item.title || "未命名情报")}</div>
+      <div class="intel-body">${esc(cleanIntelContent(item.content || item.summary || ""))}</div>
+      <div class="intel-foot">
+        <div class="intel-tags">${tags.map(t => `<span class="intel-tag">${esc(t)}</span>`).join("")}</div>
+        ${source}
+      </div>
+    </article>`;
+  }
+  function renderIntel(page = intelPage) {
+    const el = document.getElementById("intel-list");
+    const rows = (window.WC_INTEL || []).slice();
+    const total = rows.length;
+    const pages = Math.max(1, Math.ceil(total / INTEL_PAGE_SIZE));
+    intelPage = Math.max(0, Math.min(Number(page) || 0, pages - 1));
+    const start = intelPage * INTEL_PAGE_SIZE;
+    const pageRows = rows.slice(start, start + INTEL_PAGE_SIZE);
+    if (!total) {
+      el.innerHTML = '<div class="empty-note">情报雷达还没有入库内容</div>';
+      return;
+    }
+    const end = Math.min(start + pageRows.length, total);
+    el.innerHTML = `<div class="betlog-head">
+        <div class="betlog-note">第 ${start + 1}-${end} 条 / 共 ${total} 条 · 最新在前</div>
+      </div>
+      <div class="intel-list">${pageRows.map(intelCard).join("")}</div>
+      <div class="betlog-pager">
+        <button class="intel-prev" ${intelPage <= 0 ? "disabled" : ""}>‹ 上一页</button>
+        <span>第 ${intelPage + 1} / ${pages} 页</span>
+        <button class="intel-next" ${intelPage >= pages - 1 ? "disabled" : ""}>下一页 ›</button>
+        <label class="betlog-jump">跳至 <input class="intel-page-input" type="number" min="1" max="${pages}" value="${intelPage + 1}" inputmode="numeric"> 页</label>
+        <button class="intel-go">跳转</button>
+      </div>`;
+    el.querySelector(".intel-prev").onclick = () => renderIntel(intelPage - 1);
+    el.querySelector(".intel-next").onclick = () => renderIntel(intelPage + 1);
+    const jump = () => renderIntel(Number(el.querySelector(".intel-page-input").value) - 1);
+    el.querySelector(".intel-go").onclick = jump;
+    el.querySelector(".intel-page-input").addEventListener("keydown", e => {
+      if (e.key === "Enter") jump();
+    });
+  }
+  renderIntel();
+
   /* ===== 总览：领奖台 ===== */
   const medals = ["① 头号热门", "② 次席", "③ 第三热门"];
   document.getElementById("podium").innerHTML = D.teams.slice(0, 3).map((t, i) => `
@@ -1361,7 +1601,7 @@
           <div class="fcell"><div class="fl">${label}</div><div class="fv">${pct(t[k])}</div>
             <div class="ft"><i style="width:${(t[k] * 100).toFixed(1)}%"></i></div></div>`).join("")}
         ${t.p_champion_market != null ? `
-          <div class="fcell"><div class="fl">市场夺冠赔率</div>
+          <div class="fcell"><div class="fl">公开数据参考</div>
             <div class="fv" style="color:var(--gold)">${pct(t.p_champion_market)}</div>
             <div class="ft"><i style="width:${(t.p_champion_market * 100).toFixed(1)}%;background:var(--gold)"></i></div></div>` : ""}
       </div>`;
@@ -1528,8 +1768,8 @@
     if (!f) return "";
     const parts = [];
     const d = Number(f.delta || 0), draw = Number(f.draw || 0), total = Number(f.total || 0);
-    if (d) parts.push(`${d > 0 ? "+" : ""}${d}`);
-    if (draw) parts.push(`平${draw > 0 ? "+" : ""}${draw}`);
+    if (d) parts.push(`主客${d > 0 ? "+" : ""}${d}pp`);
+    if (draw) parts.push(`平${draw > 0 ? "+" : ""}${draw}pp`);
     if (total) parts.push(`总球${total > 0 ? "+" : ""}${total}`);
     return parts.join(" ") || "微调";
   }
@@ -1546,7 +1786,7 @@
     const badge = `<span class="stage-badge${ko ? " ko" : ""}">${STAGE_NAME[m.stage]}${m.group ? " · " + m.group + "组" : ""}${m.stage === "group" && m.round ? " 第" + m.round + "轮" : ""}</span>`;
     const obar = p => `<div class="obar${m.score ? " dim" : ""}"><i class="h" style="width:${p.p_home * 100}%"></i><i class="d" style="width:${p.p_draw * 100}%"></i><i class="a" style="width:${p.p_away * 100}%"></i></div>`;
     const probs = p => `<div class="pred-line"><span class="ph">主胜 ${pct(p.p_home, 0)}</span><span class="pd">平 ${pct(p.p_draw, 0)}</span><span class="pa">客胜 ${pct(p.p_away, 0)}</span></div>`;
-    const advisorTag = p => p.fable ? `<span class="advisor-tag" title="${esc(p.fable.note)}">${ADVISOR_NAME} ${esc(advisorSummary(p.fable))}</span>` : "";
+    const advisorTag = p => p.fable ? `<span class="advisor-tag" title="${esc(p.fable.note)}">${ADVISOR_NAME}扰动 ${esc(advisorSummary(p.fable))}</span>` : "";
     let mid, verdict = "";
     if (m.score) {
       const pens = m.score[0] === m.score[1] && m.winner ? `<span class="pens">点球 ${esc(zh(m.winner))} 晋级</span>` : "";
@@ -1643,12 +1883,12 @@
       right += `<div class="md-compare">晋级概率（含加时/点球）：<b>${esc(hn)} ${pct(p.p_adv_home)}</b> · ${esc(an)} ${pct(p.p_adv_away)}</div>`;
     }
     if (p.market) {
-      right += `<div class="md-compare">博彩市场（${p.market.books} 家庄家）：主胜 <b>${pct(p.market.p_home, 0)}</b> · 平 <b>${pct(p.market.p_draw, 0)}</b> · 客胜 <b>${pct(p.market.p_away, 0)}</b></div>`;
+      right += `<div class="md-compare">公开数据参考（${p.market.books} 个来源）：主胜 <b>${pct(p.market.p_home, 0)}</b> · 平 <b>${pct(p.market.p_draw, 0)}</b> · 客胜 <b>${pct(p.market.p_away, 0)}</b></div>`;
     }
     if (p.fable) {
       const d = p.fable.delta;
       const lean = d > 0 ? `（偏向${esc(hn)}）` : d < 0 ? `（偏向${esc(an)}）` : "";
-      right += `<div class="md-compare advisor-line"><b>${ADVISOR_NAME} 微调 ${esc(advisorSummary(p.fable))}</b>${lean}：${esc(p.fable.note)}${p.base ? `<br>引擎原判：主胜 ${pct(p.base.p_home, 0)} / 平 ${pct(p.base.p_draw, 0)} / 客胜 ${pct(p.base.p_away, 0)} → 微调后如上` : ""}</div>`;
+      right += `<div class="md-compare advisor-line"><b>${ADVISOR_NAME} 扰动 ${esc(advisorSummary(p.fable))}</b>${lean}：${esc(p.fable.note)}${p.base ? `<br>引擎原判：主胜 ${pct(p.base.p_home, 0)} / 平 ${pct(p.base.p_draw, 0)} / 客胜 ${pct(p.base.p_away, 0)} → 扰动后如上` : ""}</div>`;
     }
     if (m.score) {
       const o = m.score[0] > m.score[1] ? esc(hn) + " 胜" : m.score[0] < m.score[1] ? esc(an) + " 胜" : "战平";
@@ -1760,14 +2000,14 @@
       label: "AI 热门",
       match: busy.m.match,
       matchText: matchName(busy.m),
-      note: `${busy.total} 个 AI 已下注 · 主${busy.counts.H} / 平${busy.counts.D} / 客${busy.counts.A}`,
+      note: `${busy.total} 个 AI 已提交 · 主${busy.counts.H} / 平${busy.counts.D} / 客${busy.counts.A}`,
     });
     const gap = marketGaps[0];
     addUnique(items, gap && {
-      label: "赔率分歧",
+      label: "概率分歧",
       match: gap.m.match,
       matchText: matchName(gap.m),
-      note: `模型${gap.modelHigher ? "更看好" : "低于盘口"} ${pickName(gap.m, gap.pick)} ${pct(gap.gap, 0)}`,
+      note: `模型${gap.modelHigher ? "更看好" : "低于市场参考"} ${pickName(gap.m, gap.pick)} ${pct(gap.gap, 0)}`,
     });
 
     if (items.length < 3) {
@@ -2013,12 +2253,13 @@
     }).join("");
   })();
 
-  /* ===== 竞技场：登录 / 下注 / 排行榜 ===== */
+  /* ===== 竞技场：登录 / 提交预测 / 排行榜 ===== */
   window.Arena = (function () {
     const GH = '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>';
     const S = { me: null, odds: {}, byMatch: {}, myBets: [], on: false,
       agentProfiles: Object.create(null),
-      discussion: { before: null, done: false, loading: false } };
+      discussion: { before: null, done: false, loading: false },
+      betLog: { page: 0, rows: [], total: 0, totalPages: 1, hasNext: false, loading: false } };
     const api = (p, opt) => fetch(p, Object.assign({ credentials: "same-origin" }, opt))
       .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e.detail || ("HTTP " + r.status))));
 
@@ -2041,9 +2282,9 @@
     async function init() {
       try {
         const [me, odds, bets] = await Promise.all(
-          [api("/api/me"), api("/api/odds"), api("/api/bets/recent")]);
+          [api("/api/me"), api("/api/projections"), api("/api/picks/recent")]);
         S.me = me.login ? me : null;
-        if (S.me) api("/api/bets/me").then(b => { S.myBets = b; }).catch(() => {});
+        if (S.me) api("/api/picks/me").then(b => { S.myBets = b; }).catch(() => {});
         S.odds = odds;
         groupBets(bets);
         rememberAgents(bets);
@@ -2053,6 +2294,8 @@
       renderNavUser();
       decorateCards();
       renderRank();
+      if (document.getElementById("tab-bets")?.classList.contains("active"))
+        renderAgentBets(0, true);
       if (S.on) {
         api("/api/agents").then(a => {
           S.arena = a;
@@ -2201,11 +2444,36 @@
         <div class="mp-foot">
           <div class="mp-site">
             <div class="mp-url">worldcup.lightai.io</div>
-            <div class="mp-sub">看全部 AI 预测与投注</div>
+            <div class="mp-sub">看全部 AI 预测记录</div>
           </div>
           <div class="mp-qr">${qrImg}</div>
         </div>
       </div>`;
+    }
+
+    const POSTER_BASE_W = 900;
+    const POSTER_BASE_H = 1200;
+
+    function fitPosterModal(modal) {
+      const stage = modal.querySelector(".poster-stage");
+      const shell = modal.querySelector(".poster-scale-shell");
+      const poster = modal.querySelector(".match-poster");
+      if (!stage || !shell || !poster) return;
+      const r = stage.getBoundingClientRect();
+      const scale = Math.min(1, r.width / POSTER_BASE_W, r.height / POSTER_BASE_H);
+      const viewW = Math.max(1, Math.floor(POSTER_BASE_W * scale));
+      const viewH = Math.max(1, Math.floor(POSTER_BASE_H * scale));
+      shell.style.width = viewW + "px";
+      shell.style.height = viewH + "px";
+      poster.style.transform = `scale(${scale})`;
+    }
+
+    function closePosterModal(modal) {
+      if (!modal) return;
+      if (modal._posterOnResize) window.removeEventListener("resize", modal._posterOnResize);
+      if (modal._posterOnKey) document.removeEventListener("keydown", modal._posterOnKey);
+      modal.remove();
+      document.body.classList.remove("poster-open");
     }
 
     function ensurePosterModal() {
@@ -2222,10 +2490,17 @@
         <div class="poster-stage"></div>
       </div>`;
       document.body.appendChild(modal);
+      modal._posterOnResize = () => fitPosterModal(modal);
+      modal._posterOnKey = e => { if (e.key === "Escape") closePosterModal(modal); };
+      window.addEventListener("resize", modal._posterOnResize);
+      document.addEventListener("keydown", modal._posterOnKey);
       modal.addEventListener("click", e => {
-        if (e.target === modal || e.target.closest("[data-poster-close]")) {
-          modal.hidden = true;
-        }
+        if (e.target === modal) closePosterModal(modal);
+      });
+      modal.querySelector("[data-poster-close]").addEventListener("click", e => {
+        e.preventDefault();
+        e.stopPropagation();
+        closePosterModal(modal);
       });
       modal.querySelector("[data-poster-download]").addEventListener("click", async e => {
         e.preventDefault();
@@ -2236,16 +2511,23 @@
         btn.disabled = true;
         btn.textContent = "生成中...";
         try {
-          if (!window.html2canvas) {
-            await new Promise((res, rej) => {
-              const s = document.createElement("script");
-              s.src = "html2canvas.min.js";
-              s.onload = res;
-              s.onerror = () => rej(new Error("脚本加载失败"));
-              document.head.appendChild(s);
-            });
+          await ensureHtml2Canvas();
+          const renderHost = document.createElement("div");
+          renderHost.style.cssText = "position:fixed;left:-10000px;top:0;width:900px;height:1200px;overflow:hidden;pointer-events:none";
+          const renderPoster = poster.cloneNode(true);
+          Object.assign(renderPoster.style, {
+            position: "relative", left: "auto", top: "auto", transform: "none",
+            width: POSTER_BASE_W + "px", height: POSTER_BASE_H + "px",
+            aspectRatio: "auto", padding: "0 64px"
+          });
+          renderHost.appendChild(renderPoster);
+          document.body.appendChild(renderHost);
+          let canvas;
+          try {
+            canvas = await html2canvas(renderPoster, { backgroundColor: "#07100b", scale: 1080 / POSTER_BASE_W, useCORS: true });
+          } finally {
+            renderHost.remove();
           }
-          const canvas = await html2canvas(poster, { backgroundColor: "#07100b", scale: 1080 / poster.getBoundingClientRect().width, useCORS: true });
           const a = document.createElement("a");
           a.download = `ai-worldcup-match-${no}.png`;
           a.href = canvas.toDataURL("image/png");
@@ -2263,15 +2545,18 @@
       const m = byMatch[+no];
       if (!m || !m.pred) return;
       const modal = ensurePosterModal();
-      modal.querySelector(".poster-stage").innerHTML = buildMatchPoster(m);
+      modal.querySelector(".poster-stage").innerHTML =
+        `<div class="poster-scale-shell">${buildMatchPoster(m)}</div>`;
       modal.hidden = false;
+      document.body.classList.add("poster-open");
+      requestAnimationFrame(() => fitPosterModal(modal));
     }
 
     function compactPersona(p, model) {
       const raw = String(p || "").replace(/\s+/g, " ").trim();
       const text = raw || (model
         ? `本色组：保留 ${model} 的原始判断风格`
-        : "本色组：按模型原始判断下注");
+        : "本色组：按模型原始判断提交预测");
       return text.length > 82 ? text.slice(0, 82) + "…" : text;
     }
 
@@ -2314,7 +2599,7 @@
     async function openAgentHistory(login, name) {
       if (!login) return;
       try {
-        const hist = await api(`/api/bets/agent/${encodeURIComponent(login)}`);
+        const hist = await api(`/api/picks/agent/${encodeURIComponent(login)}`);
         const cached = getAgentProfile(login, name);
         if (!cached || !Array.isArray(cached.investment_lines)) {
           try {
@@ -2323,7 +2608,7 @@
           } catch (e) { /* 使用已有缓存 */ }
         }
         const profile = getAgentProfile(login, name);
-        showBetHistory(`${profile.name || name || login} 的投注记录`, hist, profile);
+        showBetHistory(`${profile.name || name || login} 的预测记录`, hist, profile);
       } catch (e) { /* 忽略 */ }
     }
 
@@ -2573,7 +2858,7 @@
           btn.classList.toggle("on", r.liked);
         } catch (e) { /* 忽略 */ }
       });
-      // 点头像/名字看该 AI 的投注记录
+      // 点头像/名字看该 AI 的预测记录
       scope.querySelectorAll(".pa-click").forEach(el => el.onclick = async () => {
         if (!el.dataset.login) return;
         openAgentHistory(el.dataset.login, el.dataset.name);
@@ -2630,10 +2915,10 @@
       const el = document.getElementById("nav-user");
       if (!S.on) { el.innerHTML = ""; return; }
       if (!S.me) {
-        el.innerHTML = `<a class="login-btn" href="/api/auth/login">${GH}登录下注</a>`;
+        el.innerHTML = `<a class="login-btn" href="/api/auth/login">${GH}登录参与</a>`;
         return;
       }
-      el.innerHTML = `<img class="uava" src="${S.me.avatar_url}" alt="" title="查看我的投注记录">
+      el.innerHTML = `<img class="uava" src="${S.me.avatar_url}" alt="" title="查看我的预测记录">
         <span class="ubal">${S.me.balance} 分</span>
         <a class="uout" href="/api/auth/logout">退出</a>`;
       el.querySelector(".uava").onclick = openMyHistory;
@@ -2657,6 +2942,44 @@
       return (pickNames || {})[b.pick] || b.pick;
     }
 
+    function betCoefficient(b) {
+      return Number(b.coefficient ?? b.odds ?? 0);
+    }
+
+    function agentTagsHtml(r) {
+      return (r.tags || []).slice(0, 2)
+        .map(t => `<span class="ai-badge style-tag">${esc(t)}</span>`).join("");
+    }
+
+    function whoCellHtml(r, size = 24) {
+      const view = publicAgent(r);
+      return `<span class="who-cell">${agentIcon(view.model || view.login, size)}<span class="who-name">${esc(view.name || view.login || "?")}</span><span class="who-tags"><span class="ai-badge">AI</span>${agentTagsHtml(view)}</span></span>`;
+    }
+
+    function betMatchInfo(b) {
+      const m = byMatch[b.match_no] || {};
+      const home = m.home || b.home || "?";
+      const away = m.away || b.away || "?";
+      return {
+        match: m,
+        text: `#${b.match_no} ${zh(home)} vs ${zh(away)}`,
+        names: { H: zh(home) + "胜", D: "平局", A: zh(away) + "胜" },
+      };
+    }
+
+    function betStatusHtml(b) {
+      if (Number(b.settled)) {
+        const net = Math.round(Number(b.payout || 0) - Number(b.stake || 0));
+        return net > 0 ? `<span class="win">+${net}</span>` : `<span class="lose">-${Math.round(Number(b.stake || 0))}</span>`;
+      }
+      return `<span class="pend">可得 ${Math.round(Number(b.stake || 0) * betCoefficient(b))}</span>`;
+    }
+
+    function betPlacedTime(ts) {
+      const s = String(ts || "");
+      return s.length > 10 ? s.slice(5, 16) : s;
+    }
+
     function betOutcomeKey(b) {
       if (!isScoreBet(b)) return b.pick;
       const [h, a] = betScorePair(b);
@@ -2676,9 +2999,9 @@
       const label = betPickLabel(b, pickNames);
       const card = `<span class="cb-card">
         <b class="cbc-name">${esc(view.name || view.login || "?")}</b>
-        <span class="cbc-bet">${esc(label)} · ${b.stake} 分 @ ${b.odds}<br>命中可得 ${Math.round(b.stake * b.odds)} 分</span>
+        <span class="cbc-bet">${esc(label)} · ${b.stake} 分 @ ${betCoefficient(b).toFixed(2)}<br>命中可得 ${Math.round(b.stake * betCoefficient(b))} 分</span>
         ${reason ? `<span class="cbc-reason">「${esc(reason.slice(0, 90))}${reason.length > 90 ? "…" : ""}」</span>` : ""}
-        <span class="cbc-go">点击查看投注记录 →</span>
+        <span class="cbc-go">点击查看预测记录 →</span>
       </span>`;
       return `<span class="cb-svg ${cls}" data-agent="${esc(b.login || "")}" data-name="${esc(view.name || view.login || "?")}">${inner}${card}</span>`;
     }
@@ -2694,7 +3017,7 @@
         if (cbH) cbH.innerHTML = "";
         if (cbA) cbA.innerHTML = "";
         card.querySelectorAll(".m-verdict .cb-D").forEach(o => o.remove());
-        // 卡片角标只展示 AI 选手的投注；人类投注不上墙
+        // 卡片角标只展示 AI 选手的预测；人类预测不上墙
         const bs = (S.byMatch[no] || []).filter(b => b.kind === "agent");
         if (!bs.length) return;
         const md = byMatch[no] || {};
@@ -2719,26 +3042,26 @@
       });
     }
 
-    // 下注确认弹窗：列清方向/注额/赔率/预期收益，确认才真正提交
+    // 预测确认弹窗：列清方向、投入积分、回报系数和预期积分。
     function confirmBet(info) {
       return new Promise(resolve => {
         const win = Math.round(info.stake * info.odds);
         const ov = document.createElement("div");
         ov.className = "bet-modal";
         ov.innerHTML = `<div class="bm-panel">
-          <div class="bm-title">确认下注</div>
+          <div class="bm-title">确认提交</div>
           <div class="bm-match">${esc(info.matchLabel)}</div>
           <div class="bm-rows">
             <div><span>${esc(info.labelTitle || "方向")}</span><b class="pick${info.pick}">${esc(info.pickLabel)} @ ${info.odds.toFixed(2)}</b></div>
-            <div><span>注额</span><b>${info.stake} 分</b></div>
-            <div><span>命中可得</span><b class="gain">${win} 分（净赚 +${win - info.stake}）</b></div>
+            <div><span>投入积分</span><b>${info.stake} 分</b></div>
+            <div><span>命中可得</span><b class="gain">${win} 分（净增 +${win - info.stake}）</b></div>
             <div><span>未中损失</span><b class="loss">-${info.stake} 分</b></div>
-            <div><span>下注后可用</span><b>${info.balance - info.stake} 分</b></div>
+            <div><span>提交后可用</span><b>${info.balance - info.stake} 分</b></div>
           </div>
-          <div class="bm-note">赔率按下注时锁定 · 开球锁盘后不可撤销</div>
+          <div class="bm-note">系数按提交时锁定 · 开球后不可修改</div>
           <div class="bm-actions">
             <button class="bm-cancel">再想想</button>
-            <button class="bm-ok">确认下注</button>
+            <button class="bm-ok">确认提交</button>
           </div>
         </div>`;
         document.body.appendChild(ov);
@@ -2755,7 +3078,7 @@
       });
     }
 
-    // 历史投注记录弹窗：分页列表，AI 的附下注理由
+    // 历史预测记录弹窗：分页列表，AI 的附预测理由
     function showBetHistory(title, bets, profile) {
       const PAGE = 8;
       let page = 0;
@@ -2778,16 +3101,16 @@
             const res = b.settled
               ? (b.payout > 0 ? `<span class="win">+${Math.round(b.payout - b.stake)}</span>`
                               : `<span class="lose">-${b.stake}</span>`)
-              : `<span class="pend">可得 ${Math.round(b.stake * b.odds)}</span>`;
+              : `<span class="pend">可得 ${Math.round(b.stake * betCoefficient(b))}</span>`;
             const score = b.score_home != null ? ` · ${b.score_home}:${b.score_away}` : "";
             return `<div class="bh-row">
               <div class="bh-main"><span class="bh-m">#${b.match_no} ${esc(zh(b.home))} vs ${esc(zh(b.away))}${score}</span>
-                <span class="pick${pickClass}">${esc(label)} @ ${Number(b.odds).toFixed(2)}</span>
+                <span class="pick${pickClass}">${esc(label)} @ ${betCoefficient(b).toFixed(2)}</span>
                 <span>${b.stake} 分</span><span class="bh-res">${res}</span></div>
               ${b.reason ? `<div class="bh-reason">「${esc(b.reason)}」</div>` : ""}
               <div class="bh-ts">${esc(String(b.placed_at || "").slice(0, 16))}</div>
             </div>`;
-          }).join("") : '<div class="empty-note">还没有投注记录</div>'}</div>
+          }).join("") : '<div class="empty-note">还没有预测记录</div>'}</div>
           ${total > 1 ? `<div class="bh-pager">
             <button class="bh-prev" ${page === 0 ? "disabled" : ""}>‹ 上一页</button>
             <span>${page + 1} / ${total}</span>
@@ -2808,34 +3131,34 @@
 
     async function openMyHistory() {
       try {
-        const bs = await api("/api/bets/me");
+        const bs = await api("/api/picks/me");
         S.myBets = bs;
-        showBetHistory("我的投注记录", bs);
+        showBetHistory("我的预测记录", bs);
       } catch (e) {}
     }
 
-    // 我的投注详情弹窗（复用确认卡样式，只读）
+    // 我的预测详情弹窗（复用确认卡样式，只读）
     function showBetDetail(b, m) {
       const names = { H: zh(m.home) + "胜", D: "平局", A: zh(m.away) + "胜" };
       const pickClass = isScoreBet(b) ? "S" : b.pick;
       const label = betPickLabel(b, names);
-      const win = Math.round(b.stake * b.odds);
+      const win = Math.round(b.stake * betCoefficient(b));
       const status = b.settled
         ? (b.payout > 0
-          ? `<b class="gain">已结算 · 派彩 ${Math.round(b.payout)}（净赚 +${Math.round(b.payout - b.stake)}）</b>`
+          ? `<b class="gain">已结算 · 结算得分 ${Math.round(b.payout)}（净增 +${Math.round(b.payout - b.stake)}）</b>`
           : `<b class="loss">已结算 · 未中（-${b.stake}）</b>`)
         : `<b>待开奖</b>`;
       const ov = document.createElement("div");
       ov.className = "bet-modal";
       ov.innerHTML = `<div class="bm-panel">
-        <div class="bm-title">我的投注</div>
+        <div class="bm-title">我的预测</div>
         <div class="bm-match">${esc(zh(m.home))} vs ${esc(zh(m.away))} · 第${m.match}场</div>
         <div class="bm-rows">
-          <div><span>${isScoreBet(b) ? "比分" : "方向"}</span><b class="pick${pickClass}">${esc(label)} @ ${Number(b.odds).toFixed(2)}</b></div>
-          <div><span>注额</span><b>${b.stake} 分</b></div>
-          <div><span>命中可得</span><b class="gain">${win} 分（净赚 +${win - b.stake}）</b></div>
+          <div><span>${isScoreBet(b) ? "比分" : "方向"}</span><b class="pick${pickClass}">${esc(label)} @ ${betCoefficient(b).toFixed(2)}</b></div>
+          <div><span>投入积分</span><b>${b.stake} 分</b></div>
+          <div><span>命中可得</span><b class="gain">${win} 分（净增 +${win - b.stake}）</b></div>
           <div><span>状态</span>${status}</div>
-          <div><span>下注时间</span><b>${esc(String(b.placed_at || "").slice(0, 16))}</b></div>
+          <div><span>提交时间</span><b>${esc(String(b.placed_at || "").slice(0, 16))}</b></div>
         </div>
         <div class="bm-actions"><button class="bm-ok">关闭</button></div>
       </div>`;
@@ -2847,7 +3170,7 @@
       ov.querySelector(".bm-ok").onclick = done;
     }
 
-    // 详情面板顶部：我在这场的投注概况（已赛未赛都显示）
+    // 详情面板顶部：我在这场的预测概况（已赛未赛都显示）
     function injectMyBets(det, m) {
       det.querySelectorAll(".my-bets").forEach(o => o.remove());
       if (!S.me) return;
@@ -2856,13 +3179,13 @@
       const names = { H: zh(m.home) + "胜", D: "平局", A: zh(m.away) + "胜" };
       const box = document.createElement("div");
       box.className = "my-bets";
-      box.innerHTML = `<span class="mbt">我的投注</span>` + mine.map((b, i) => {
+      box.innerHTML = `<span class="mbt">我的预测</span>` + mine.map((b, i) => {
         const label = betPickLabel(b, names);
         const res = b.settled
           ? (b.payout > 0 ? `<span class="win">+${Math.round(b.payout - b.stake)}</span>`
                           : `<span class="lose">-${b.stake}</span>`)
-          : `<span class="pend">可得 ${Math.round(b.stake * b.odds)}</span>`;
-        return `<button class="mb-chip" data-i="${i}">${esc(label)} · ${b.stake} @ ${Number(b.odds).toFixed(2)} · ${res}</button>`;
+          : `<span class="pend">可得 ${Math.round(b.stake * betCoefficient(b))}</span>`;
+        return `<button class="mb-chip" data-i="${i}">${esc(label)} · ${b.stake} @ ${betCoefficient(b).toFixed(2)} · ${res}</button>`;
       }).join("");
       det.appendChild(box);
       box.querySelectorAll(".mb-chip").forEach(ch =>
@@ -2877,7 +3200,7 @@
       if (m.score) return;
       const o = S.odds[m.match];
       if (!o) return;
-      // 开球即截止：开球后不再渲染下注框，只留关闭提示
+      // 开球即截止：开球后不再渲染提交预测框，只留关闭提示
       const kickoff = new Date(m.date_utc.replace(" ", "T")).getTime();
       const closed = () => Date.now() >= kickoff;
       const fmtLeft = () => {
@@ -2887,11 +3210,12 @@
       };
       if (closed()) {
         det.insertAdjacentHTML("beforeend",
-          '<div class="bet-closed">已开球 · 下注通道关闭，完赛后自动结算</div>');
+          '<div class="bet-closed">已开球 · 预测入口关闭，完赛后自动结算</div>');
         return;
       }
       const names = { H: zh(m.home) + "胜", D: "平局", A: zh(m.away) + "胜" };
-      const scoreOdds = o.score_odds || {};
+      const coefficients = o.coefficients || o.odds || {};
+      const scoreOdds = o.score_coefficients || o.score_odds || {};
       const maxScore = Number(o.score_max_goals ?? 6);
       const scoreCells = [];
       for (let h = 0; h <= maxScore; h++) {
@@ -2905,22 +3229,22 @@
       }
       const box = document.createElement("div");
       box.className = "bet-box";
-      box.innerHTML = `<div class="md-title">下注 · 虚拟积分 · <span class="bet-ddl">距开球截止还有 ${fmtLeft()}</span></div>
+      box.innerHTML = `<div class="md-title">提交预测 · 虚拟积分 · <span class="bet-ddl">距开球截止还有 ${fmtLeft()}</span></div>
         <div class="bet-odds">${["H", "D", "A"].map(k =>
-          `<button class="odds-btn" data-k="${k}"><span class="ol">${names[k]}</span><span class="ov">${o.odds[k].toFixed(2)}</span></button>`).join("")}</div>
-        ${scoreCells.length ? `<button class="score-bet-toggle" type="button"><span>比分投注</span><b>0-${maxScore} 全比分赔率</b></button>
+          `<button class="odds-btn" data-k="${k}"><span class="ol">${names[k]}</span><span class="ov">${coefficients[k].toFixed(2)}</span></button>`).join("")}</div>
+        ${scoreCells.length ? `<button class="score-bet-toggle" type="button"><span>比分预测</span><b>0-${maxScore} 全比分回报系数</b></button>
           <div class="score-bet-panel"><div class="score-grid">${scoreCells.join("")}</div></div>` : ""}
         <div class="bet-stake">
-          <input type="number" min="10" step="10" value="100" aria-label="注额">
+          <input type="number" min="10" step="10" value="100" aria-label="投入积分">
           ${[20, 50, 100].map(v => `<button class="stake-quick" data-v="${v}">${v}</button>`).join("")}
-          <button class="bet-submit">${S.me ? "下注" : "登录后下注"}</button>
+          <button class="bet-submit">${S.me ? "提交预测" : "登录后提交预测"}</button>
         </div><div class="bet-msg"></div>`;
       det.appendChild(box);
       const tick = setInterval(() => {
         if (!document.body.contains(box)) { clearInterval(tick); return; }
         if (closed()) {
           clearInterval(tick);
-          box.innerHTML = '<div class="bet-closed">已开球 · 下注通道关闭，完赛后自动结算</div>';
+          box.innerHTML = '<div class="bet-closed">已开球 · 预测入口关闭，完赛后自动结算</div>';
           return;
         }
         const el = box.querySelector(".bet-ddl");
@@ -2959,12 +3283,12 @@
         b.onclick = () => { box.querySelector("input").value = b.dataset.v; });
       box.querySelector(".bet-submit").onclick = async () => {
         if (!S.me) { location.href = "/api/auth/login"; return; }
-        if (closed()) { msg.textContent = "已开球，投注关闭"; msg.className = "bet-msg err"; return; }
+        if (closed()) { msg.textContent = "已开球，预测关闭"; msg.className = "bet-msg err"; return; }
         if (!pick && !scorePick) { msg.textContent = "先选一个方向或比分"; msg.className = "bet-msg err"; return; }
         const stake = parseInt(box.querySelector("input").value, 10) || 0;
-        if (stake < 10) { msg.textContent = "注额至少 10 分"; msg.className = "bet-msg err"; return; }
+        if (stake < 10) { msg.textContent = "投入积分至少 10 分"; msg.className = "bet-msg err"; return; }
         if (scorePick && stake > 50) {
-          msg.textContent = "比分投注单注最多 50 分";
+          msg.textContent = "比分预测单注最多 50 分";
           msg.className = "bet-msg err"; return;
         }
         if (stake > S.me.balance) {
@@ -2977,24 +3301,25 @@
           pick: isScore ? "S" : pick,
           pickLabel: isScore ? `${scorePick.home}-${scorePick.away}` : names[pick],
           labelTitle: isScore ? "比分" : "方向",
-          odds: isScore ? scorePick.odds : o.odds[pick],
+          odds: isScore ? scorePick.odds : coefficients[pick],
           stake, balance: S.me.balance,
         });
         if (!ok) return;
         try {
-          const r = await api(isScore ? "/api/score-bets" : "/api/bets", {
+          const r = await api(isScore ? "/api/score-picks" : "/api/picks", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(isScore
               ? { match_no: m.match, home_score: scorePick.home, away_score: scorePick.away, stake }
               : { match_no: m.match, pick, stake }),
           });
+          const saved = r.pick || r.bet;
           S.me.balance = r.balance;
           renderNavUser();
-          msg.textContent = `已下注 ${stake} @ ${r.bet.odds} · 祝好运`;
+          msg.textContent = `已提交 ${stake} @ ${saved.coefficient || saved.odds} · 祝好运`;
           msg.className = "bet-msg ok";
-          api("/api/bets/recent").then(bs => { groupBets(bs); decorateCards(); });
-          api("/api/bets/me").then(b => { S.myBets = b; injectMyBets(det, m); }).catch(() => {});
+          api("/api/picks/recent").then(bs => { groupBets(bs); decorateCards(); });
+          api("/api/picks/me").then(b => { S.myBets = b; injectMyBets(det, m); }).catch(() => {});
         } catch (e) {
           msg.textContent = String(e);
           msg.className = "bet-msg err";
@@ -3013,6 +3338,135 @@
       if (S.on) betSection(det, m);
     }
 
+    function betLogRowHtml(b, i) {
+      const view = publicAgent(b);
+      const info = betMatchInfo(b);
+      const pickClass = isScoreBet(b) ? "S" : b.pick;
+      const label = betPickLabel(b, info.names);
+      const reason = String(b.reason || "").trim();
+      return `<tr class="betlog-open" data-login="${esc(view.login || "")}" data-name="${esc(view.name || view.login || "?")}">
+        <td class="rk">${S.betLog.page * 20 + i + 1}</td>
+        <td>${betPlacedTime(b.placed_at)}</td>
+        <td class="betlog-who">${whoCellHtml(view, 24)}</td>
+        <td class="betlog-match"><button class="betlog-match-btn" type="button" data-match="${b.match_no}">${esc(info.text)}</button>${reason ? `<span class="betlog-reason">「${esc(reason)}」</span>` : ""}</td>
+        <td><span class="betlog-pick pick${pickClass}">${esc(label)}</span></td>
+        <td>${Math.round(Number(b.stake || 0))} 分</td>
+        <td>@ ${betCoefficient(b).toFixed(2)}</td>
+        <td class="betlog-status">${betStatusHtml(b)}</td>
+      </tr>`;
+    }
+
+    function betLogCardHtml(b, i) {
+      const view = publicAgent(b);
+      const info = betMatchInfo(b);
+      const pickClass = isScoreBet(b) ? "S" : b.pick;
+      const label = betPickLabel(b, info.names);
+      const reason = String(b.reason || "").trim();
+      return `<div class="rank-card betlog-open" data-login="${esc(view.login || "")}" data-name="${esc(view.name || view.login || "?")}">
+        <div class="rank-card-top">
+          <span class="rank-card-rk">#${S.betLog.page * 20 + i + 1}</span>
+          <div class="rank-card-main"><div class="rank-card-name">${whoCellHtml(view, 22)}</div></div>
+          <span class="rank-card-value">${betPlacedTime(b.placed_at)}</span>
+        </div>
+        <div class="rank-card-metrics">
+          <span><button class="betlog-match-btn" type="button" data-match="${b.match_no}">${esc(info.text)}</button></span>
+          <span class="pick${pickClass}">${esc(label)}</span>
+          <span>${Math.round(Number(b.stake || 0))} 分 @ ${betCoefficient(b).toFixed(2)}</span>
+          <span class="betlog-status">${betStatusHtml(b)}</span>
+        </div>
+        ${reason ? `<div class="betlog-reason">「${esc(reason)}」</div>` : ""}
+      </div>`;
+    }
+
+    function paintBetLog() {
+      const el = document.getElementById("betlog-body");
+      if (!el) return;
+      const rows = S.betLog.rows || [];
+      const start = S.betLog.page * 20 + 1;
+      const end = S.betLog.page * 20 + rows.length;
+      const total = Number(S.betLog.total || rows.length || 0);
+      const totalPages = Math.max(1, Number(S.betLog.totalPages || 1));
+      const pageNow = Math.min(S.betLog.page + 1, totalPages);
+      el.innerHTML = `<div class="betlog-head">
+          <div class="betlog-note">${rows.length ? `第 ${start}-${end} 条 / 共 ${total} 条` : "暂无记录"} · 只展示 AI 预测</div>
+        </div>
+        ${rows.length ? `<table class="rank-table betlog-table">
+          <tr><th>#</th><th>时间</th><th>AI</th><th>比赛</th><th>预测</th><th>投入积分</th><th>回报系数</th><th>状态</th></tr>
+          ${rows.map(betLogRowHtml).join("")}
+        </table>
+        <div class="betlog-cards">${rows.map(betLogCardHtml).join("")}</div>` : '<div class="empty-note">还没有 AI 预测记录</div>'}
+        <div class="betlog-pager">
+          <button class="betlog-prev" ${S.betLog.page <= 0 || S.betLog.loading ? "disabled" : ""}>‹ 上一页</button>
+          <span>${pageNow} / ${totalPages}</span>
+          <button class="betlog-next" ${!S.betLog.hasNext || S.betLog.loading ? "disabled" : ""}>下一页 ›</button>
+          <label class="betlog-jump">跳至 <input class="betlog-page-input" type="number" min="1" max="${totalPages}" value="${pageNow}" inputmode="numeric"> 页</label>
+          <button class="betlog-go" ${S.betLog.loading ? "disabled" : ""}>跳转</button>
+        </div>`;
+      el.querySelector(".betlog-prev").onclick = () => renderAgentBets(S.betLog.page - 1, true);
+      el.querySelector(".betlog-next").onclick = () => renderAgentBets(S.betLog.page + 1, true);
+      const jump = () => {
+        const input = el.querySelector(".betlog-page-input");
+        const next = Math.min(totalPages, Math.max(1, parseInt(input?.value || "", 10) || pageNow)) - 1;
+        if (next !== S.betLog.page) renderAgentBets(next, true);
+      };
+      el.querySelector(".betlog-go").onclick = jump;
+      el.querySelector(".betlog-page-input").addEventListener("keydown", e => {
+        if (e.key === "Enter") jump();
+      });
+      el.querySelectorAll(".betlog-match-btn").forEach(btn =>
+        btn.addEventListener("click", e => {
+          e.stopPropagation();
+          openMatchDetail(+btn.dataset.match);
+        }));
+      el.querySelectorAll(".betlog-open").forEach(row =>
+        row.addEventListener("click", () => openAgentHistory(row.dataset.login, row.dataset.name)));
+    }
+
+    async function renderAgentBets(page = S.betLog.page, force = false) {
+      const el = document.getElementById("betlog-body");
+      if (!el) return;
+      if (!S.on) {
+        el.innerHTML = '<div class="empty-note">预测记录需要连接服务端 — 请访问 worldcup.lightai.io</div>';
+        return;
+      }
+      page = Math.max(0, page);
+      if (!force && S.betLog.rows.length && page === S.betLog.page) {
+        paintBetLog();
+        return;
+      }
+      if (S.betLog.loading) return;
+      S.betLog.loading = true;
+      if (!S.betLog.rows.length) el.innerHTML = '<div class="empty-note">正在读取 AI 预测记录…</div>';
+      let failed = false;
+      try {
+        const PAGE = 20;
+        const res = await api(`/api/picks/recent?limit=${PAGE}&offset=${page * PAGE}&with_total=1`);
+        const rows = (Array.isArray(res) ? res : (res.items || [])).map(publicAgent);
+        const total = Array.isArray(res) ? page * PAGE + rows.length : Number(res.total || 0);
+        const totalPages = Math.max(1, Math.ceil(total / PAGE));
+        if (page >= totalPages && page > 0) {
+          S.betLog.loading = false;
+          return renderAgentBets(totalPages - 1, true);
+        }
+        rememberAgents(rows);
+        S.betLog.page = page;
+        S.betLog.rows = rows;
+        S.betLog.total = total;
+        S.betLog.totalPages = totalPages;
+        S.betLog.hasNext = page + 1 < totalPages;
+      } catch (e) {
+        failed = true;
+        S.betLog.rows = [];
+        S.betLog.total = 0;
+        S.betLog.totalPages = 1;
+        S.betLog.hasNext = false;
+        el.innerHTML = '<div class="empty-note">预测记录暂时打不开，稍后再试</div>';
+      } finally {
+        S.betLog.loading = false;
+      }
+      if (!failed) paintBetLog();
+    }
+
     async function renderRank() {
       const el = document.getElementById("rank-body");
       if (!S.on) {
@@ -3023,14 +3477,14 @@
         const rows = (await api("/api/leaderboard")).map(publicAgent);
         rememberAgents(rows);
         if (!rows.length) {
-          el.innerHTML = '<div class="empty-note">虚位以待 — GitHub 登录即领 1000 积分，开球前皆可下注</div>';
+          el.innerHTML = '<div class="empty-note">虚位以待 — GitHub 登录即领 1000 积分，开球前皆可提交预测</div>';
           return;
         }
         const canOpen = r => r.kind === "agent" || (S.me && r.login === S.me.login);
         const agentTags = r => (r.tags || []).slice(0, 2)
           .map(t => `<span class="ai-badge style-tag">${esc(t)}</span>`).join("");
         const whoHtml = r => `<span class="who-cell">${r.kind === "agent" ? agentIcon(r.model || r.login, 24) : (r.avatar_url ? `<img src="${r.avatar_url}">` : "")}<span class="who-name">${esc(r.name || r.login || "?")}</span>${r.kind === "agent" ? `<span class="who-tags"><span class="ai-badge">AI</span>${agentTags(r)}</span>` : ""}</span>`;
-        const rowAttrs = r => `data-login="${esc(r.login || "")}" data-kind="${r.kind}" data-name="${esc(r.name || r.login || "?")}"${canOpen(r) ? ' class="rk-click" title="查看投注记录"' : ""}`;
+        const rowAttrs = r => `data-login="${esc(r.login || "")}" data-kind="${r.kind}" data-name="${esc(r.name || r.login || "?")}"${canOpen(r) ? ' class="rk-click" title="查看预测记录"' : ""}`;
         el.innerHTML = `<table class="rank-table">
           <tr><th>#</th><th>玩家</th><th>净资产</th><th>可用</th><th>在投</th><th>ROI</th><th>胜/已结</th></tr>` +
           rows.map((r, i) => `<tr ${rowAttrs(r)}>
@@ -3040,7 +3494,7 @@
             <td>${r.roi == null ? "—" : (r.roi * 100).toFixed(1) + "%"}</td>
             <td>${r.wins}/${r.settled_n}</td></tr>`).join("") + "</table>" +
           `<div class="rank-cards">` + rows.map((r, i) => `
-            <div class="rank-card${canOpen(r) ? " rk-click" : ""}" data-login="${esc(r.login || "")}" data-kind="${r.kind}" data-name="${esc(r.name || r.login || "?")}"${canOpen(r) ? ' title="查看投注记录"' : ""}>
+            <div class="rank-card${canOpen(r) ? " rk-click" : ""}" data-login="${esc(r.login || "")}" data-kind="${r.kind}" data-name="${esc(r.name || r.login || "?")}"${canOpen(r) ? ' title="查看预测记录"' : ""}>
               <div class="rank-card-top">
                 <span class="rank-card-rk">#${i + 1}</span>
                 <div class="rank-card-main"><div class="rank-card-name">${whoHtml(r)}</div></div>
@@ -3069,7 +3523,7 @@
     }
 
     init();
-    return { enhanceDetail, decorateCards, confirmBet, showBetDetail, showBetHistory };
+    return { enhanceDetail, decorateCards, confirmBet, showBetDetail, showBetHistory, renderAgentBets };
   })();
 
   /* ===== 保存长图 ===== */
@@ -3078,17 +3532,11 @@
     // 固定二维码（指向 worldcup.lightai.io），内嵌避免依赖外部 CDN
     const qrData = "data:image/gif;base64,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";
     window.WC_QR_DATA = qrData;
-    const loadScript = src => new Promise((res, rej) => {
-      const s = document.createElement("script");
-      s.src = src; s.onload = res; s.onerror = () => rej(new Error("脚本加载失败"));
-      document.head.appendChild(s);
-    });
     btn.addEventListener("click", async () => {
       btn.disabled = true;
       btn.classList.add("busy");
       try {
-        if (!window.html2canvas)
-          await loadScript("html2canvas.min.js");
+        await ensureHtml2Canvas();
         const sec = document.querySelector("section.tab.active");
         const tabId = sec.id.replace("tab-", "");
         const tabName = (TABS.find(([id]) => id === tabId) || ["", ""])[1];

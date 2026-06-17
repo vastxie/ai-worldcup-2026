@@ -1,4 +1,4 @@
-"""投注 API 服务：GitHub 登录 + 虚拟积分投注 + 排行榜。
+"""预测 API 服务：GitHub 登录 + 虚拟积分预测 + 排行榜。
 
 运行：.venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8643
 nginx 把 /api/ 反代到本服务；静态站照旧由 nginx 直接服务。
@@ -6,7 +6,7 @@ nginx 把 /api/ 反代到本服务；静态站照旧由 nginx 直接服务。
 安全要点：
 - 会话 = HMAC 签名 cookie（HttpOnly/Secure/SameSite=Lax），无服务端会话存储
 - 写接口校验 Origin + 限频（IP 维度）
-- 下注守卫：开球即锁盘（沿用滚球盘口事故的教训），赔率下注瞬间快照
+- 预测守卫：开球即锁定（沿用赛中数据事故的教训），回报系数提交瞬间快照
 - 积分为虚拟娱乐积分，不可兑现
 """
 
@@ -80,10 +80,10 @@ SECRET = SESSION_SECRET.encode()
 SESSION_COOKIE = "wc_session"
 SESSION_TTL = 30 * 24 * 3600
 MIN_STAKE, MAX_STAKE = 10, 100000
-ODDS_CAP_P = 0.02          # 概率下限 → 赔率上限 50x
+ODDS_CAP_P = 0.02          # 概率下限 → 回报系数上限 50x
 SCORE_MIN_STAKE, SCORE_MAX_STAKE = 10, 50
 SCORE_MAX_GOALS = 6
-SCORE_ODDS_CAP_P = 1 / 80  # 比分投注赔率上限 80x
+SCORE_ODDS_CAP_P = 1 / 80  # 比分预测回报系数上限 80x
 
 app = FastAPI(title="worldcup-arena", docs_url=None, redoc_url=None)
 db.init_db()
@@ -168,12 +168,12 @@ def check_origin(request: Request) -> None:
         raise HTTPException(403, "来源不被允许")
 
 
-# ------------------------------------------------------------------- odds --
+# ---------------------------------------------------------------- projection --
 
 _odds_cache = {"mtime": 0.0, "data": {}}
 
 def current_odds() -> dict:
-    """从最新预测结果换算固定赔率：odds = 1 / p（按 mtime 缓存）。"""
+    """从最新预测结果换算固定回报系数（按 mtime 缓存）。"""
     path = ROOT / "out" / "results.json"
     mtime = path.stat().st_mtime
     if mtime != _odds_cache["mtime"]:
@@ -208,6 +208,34 @@ def current_odds() -> dict:
             }
         _odds_cache.update(mtime=mtime, data=table)
     return _odds_cache["data"]
+
+
+def public_projections() -> dict:
+    """公开接口使用低敏字段名；内部 odds 字段不透出。"""
+    out = {}
+    for match_no, item in current_odds().items():
+        out[match_no] = {
+            "date_utc": item["date_utc"],
+            "home": item["home"],
+            "away": item["away"],
+            "probs": item["probs"],
+            "coefficients": item["odds"],
+            "score_coefficients": item.get("score_odds") or {},
+            "score_probs": item.get("score_probs") or {},
+            "score_max_goals": item.get("score_max_goals"),
+        }
+    return out
+
+
+def public_pick_row(row: dict) -> dict:
+    out = dict(row)
+    if "odds" in out:
+        out["coefficient"] = out.pop("odds")
+    return out
+
+
+def public_pick_rows(rows: list[dict]) -> list[dict]:
+    return [public_pick_row(r) for r in rows]
 
 
 def kickoff_passed(date_utc: str) -> bool:
@@ -297,13 +325,12 @@ def me(request: Request):
             "kind": user["kind"]}
 
 
-@app.get("/api/odds")
-def odds():
-    return current_odds()
+@app.get("/api/projections")
+def projections():
+    return public_projections()
 
 
-@app.post("/api/bets")
-async def create_bet(request: Request):
+async def _create_bet(request: Request):
     check_origin(request)
     rate_limit(request, "bet", 20)
     user = require_user(request)
@@ -318,14 +345,14 @@ async def create_bet(request: Request):
     if pick not in ("H", "D", "A"):
         raise HTTPException(422, "pick 必须是 H/D/A")
     if not (MIN_STAKE <= stake <= MAX_STAKE):
-        raise HTTPException(422, f"注额范围 {MIN_STAKE}~{MAX_STAKE}")
+        raise HTTPException(422, f"投入积分范围 {MIN_STAKE}~{MAX_STAKE}")
 
     table = current_odds()
     entry = table.get(match_no)
     if not entry:
-        raise HTTPException(400, "该场暂不可投注（对阵未定或已完赛）")
+        raise HTTPException(400, "该场暂不可提交预测（对阵未定或已完赛）")
     if kickoff_passed(entry["date_utc"]):
-        raise HTTPException(400, "已开球，投注关闭")
+        raise HTTPException(400, "已开球，预测入口关闭")
 
     odds_val = entry["odds"][pick]
     try:
@@ -338,8 +365,13 @@ async def create_bet(request: Request):
             "balance": fresh["balance"]}
 
 
-@app.post("/api/score-bets")
-async def create_score_bet(request: Request):
+@app.post("/api/picks")
+async def create_pick(request: Request):
+    resp = await _create_bet(request)
+    return {"pick": public_pick_row(resp["bet"]), "balance": resp["balance"]}
+
+
+async def _create_score_bet(request: Request):
     check_origin(request)
     rate_limit(request, "score-bet", 20)
     user = require_user(request)
@@ -356,19 +388,19 @@ async def create_score_bet(request: Request):
             and 0 <= away_score <= SCORE_MAX_GOALS):
         raise HTTPException(422, f"比分范围 0~{SCORE_MAX_GOALS}")
     if not (SCORE_MIN_STAKE <= stake <= SCORE_MAX_STAKE):
-        raise HTTPException(422, f"比分注额范围 {SCORE_MIN_STAKE}~{SCORE_MAX_STAKE}")
+        raise HTTPException(422, f"比分预测投入范围 {SCORE_MIN_STAKE}~{SCORE_MAX_STAKE}")
 
     table = current_odds()
     entry = table.get(match_no)
     if not entry:
-        raise HTTPException(400, "该场暂不可投注（对阵未定或已完赛）")
+        raise HTTPException(400, "该场暂不可提交预测（对阵未定或已完赛）")
     if kickoff_passed(entry["date_utc"]):
-        raise HTTPException(400, "已开球，投注关闭")
+        raise HTTPException(400, "已开球，预测入口关闭")
 
     key = f"{home_score}-{away_score}"
     odds_val = (entry.get("score_odds") or {}).get(key)
     if odds_val is None:
-        raise HTTPException(400, "该比分暂不可投注")
+        raise HTTPException(400, "该比分暂不可提交预测")
     try:
         bet = db.place_score_bet(user["id"], match_no, home_score,
                                  away_score, stake, odds_val)
@@ -381,30 +413,39 @@ async def create_score_bet(request: Request):
             "balance": fresh["balance"]}
 
 
-@app.get("/api/bets/me")
-def my_bets(request: Request):
+@app.post("/api/score-picks")
+async def create_score_pick(request: Request):
+    resp = await _create_score_bet(request)
+    return {"pick": public_pick_row(resp["bet"]), "balance": resp["balance"]}
+
+
+@app.get("/api/picks/me")
+def my_picks(request: Request):
     user = require_user(request)
-    return db.user_bets(user["id"])
+    return public_pick_rows(db.user_bets(user["id"]))
 
 
-@app.get("/api/bets/match/{match_no}")
-def bets_of_match(match_no: int):
-    return db.match_bets(match_no, agents_only=True)
+@app.get("/api/picks/match/{match_no}")
+def picks_of_match(match_no: int):
+    return public_pick_rows(db.match_bets(match_no, agents_only=True))
 
 
-@app.get("/api/bets/agent/{login}")
-def agent_bet_history(login: str):
-    """AI 选手的完整投注记录公开可查；人类玩家互相不可见。"""
+@app.get("/api/picks/agent/{login}")
+def agent_pick_history(login: str):
     u = db.user_by_login(login)
     if not u or u["kind"] != "agent":
-        raise HTTPException(404, "只有 AI 选手的投注记录是公开的")
-    return db.user_bets(u["id"])
+        raise HTTPException(404, "只有 AI 选手的预测记录是公开的")
+    return public_pick_rows(db.user_bets(u["id"]))
 
 
-@app.get("/api/bets/recent")
-def recent_bets():
-    """公开最近 AI 投注流，用于比赛卡角标与动态。人类投注不上墙。"""
-    return db.recent_agent_bets(100)
+@app.get("/api/picks/recent")
+def recent_picks(limit: int = 100, offset: int = 0, with_total: bool = False):
+    limit = max(1, min(int(limit or 100), 500))
+    offset = max(0, int(offset or 0))
+    items = public_pick_rows(db.recent_agent_bets(limit, offset))
+    if with_total:
+        return {"items": items, "total": db.recent_agent_bets_count()}
+    return items
 
 
 @app.post("/api/posts/{post_id}/like")
