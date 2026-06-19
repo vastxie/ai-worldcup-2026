@@ -37,9 +37,7 @@ Match scores are generated from expected goals with low-score correction. The pu
 - likely score tags in match cards
 - a score probability heatmap in match detail
 - Top 5 score predictions
-- a selected 0-6 score challenge table when a score has enough probability mass to be meaningful
-
-The score challenge table intentionally hides extremely tiny probability cells so the UI does not flood users with long-tail noise.
+- a full 0-0 to 6-6 score challenge table with fixed coefficients
 
 ## AI-Agent System
 

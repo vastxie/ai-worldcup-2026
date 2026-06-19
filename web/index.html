@@ -3403,7 +3403,7 @@
       box.innerHTML = `<div class="md-title">提交预测 · 虚拟积分 · <span class="bet-ddl">距开球截止还有 ${fmtLeft()}</span></div>
         <div class="bet-odds">${["H", "D", "A"].map(k =>
           `<button class="odds-btn" data-k="${k}"><span class="ol">${names[k]}</span><span class="ov">${coefficients[k].toFixed(2)}</span></button>`).join("")}</div>
-        ${scoreCells.length ? `<button class="score-bet-toggle" type="button"><span>比分挑战</span><b>精选比分表 · 0-${maxScore}</b></button>
+        ${scoreCells.length ? `<button class="score-bet-toggle" type="button"><span>比分挑战</span><b>全比分表 · 0-0 到 ${maxScore}-${maxScore}</b></button>
           <div class="score-bet-panel"><div class="score-grid">${scoreCells.join("")}</div></div>` : ""}
         <div class="bet-stake">
           <input type="number" min="10" step="10" value="100" aria-label="投入积分">
