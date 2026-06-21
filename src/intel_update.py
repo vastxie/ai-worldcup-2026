@@ -84,6 +84,24 @@ DEFAULT_FEEDS = [
         "url": "https://www.aljazeera.com/xml/rss/all.xml",
         "priority": 60,
     },
+    {
+        "id": "covers",
+        "name": "Covers",
+        "url": "https://www.covers.com/rss",
+        "priority": 85,
+    },
+    {
+        "id": "vsin",
+        "name": "VSiN",
+        "url": "https://www.vsin.com/feed/",
+        "priority": 82,
+    },
+    {
+        "id": "90min",
+        "name": "90min",
+        "url": "https://www.90min.com/feed",
+        "priority": 55,
+    },
 ]
 
 INTEL_EDITOR_SYSTEM = """你是世界杯预测站的情报广场编辑 Agent。
