@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>分享海报 · 第2轮优化预览</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@500;700;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #07100b;
+    --ink: #eaf6ec; --dim: #87a690; --faint: #54705c;
+    --lime: #b8f53d; --lime-dark: #7fb324; --gold: #ffd75e;
+    --hot: #ff7a52; --draw: #6b7f70;
+    --line-strong: rgba(214,255,222,.22);
+    --line: rgba(214,255,222,.10);
+    --mono: "IBM Plex Mono", ui-monospace, monospace;
+    --sans: "Noto Sans SC", -apple-system, "PingFang SC", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    min-height: 100vh;
+    background: radial-gradient(900px 500px at 50% -10%, rgba(184,245,61,.06), transparent 60%), #050a07;
+    background-attachment: fixed;
+    color: var(--ink); font-family: var(--sans);
+    display: flex; flex-direction: column; align-items: center;
+    gap: 8px; padding: 28px 16px 60px;
+  }
+  .hint { font-family: var(--mono); font-size: 12px; color: var(--faint); letter-spacing: .1em; }
+  .hint b { color: var(--lime); }
+</style>
+<!-- 从 index.html 抽取的真实海报 CSS -->
+<style id="real-poster-css"></style>
+</head>
+<body>
+  <div class="hint">↓ <b>未赛态</b>：第1预测比分在中间(替代VS)，后2个在下方，胜率三色分段</div>
+  <div id="a"></div>
+  <div class="hint" style="margin-top:24px">↓ <b>已赛态</b>：中间大实际比分</div>
+  <div id="b"></div>
+
+<script>
+// ====== mock 依赖 ======
+const FLAG = { Germany: "🇩🇪", Curacao: "🇨🇼", Brazil: "🇧🇷", Argentina: "🇦🇷", France: "🇫🇷" };
+const STAGE_NAME = { group:"小组赛", r32:"32强", r16:"16强", qf:"1/4决赛", sf:"半决赛", final:"决赛" };
+const ESC = { "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" };
+const esc = s => String(s==null?"":s).replace(/[&<>"']/g, c => ESC[c]);
+const zh = s => ({Germany:"德国",Curacao:"库拉索",Brazil:"巴西",Argentina:"阿根廷",France:"法国"})[s] || s;
+const pct = (p,d=0) => Math.round(p*100)+"%";
+function pickLabel(m,p){ if(!p||!p.pick) return ""; if(p.pick==="D") return "平局"; return zh(p.pick==="H"?m.home:m.away)+"胜"; }
+function likelyScoresLabel(p,n=3){
+  const rows=(p&&p.top_scores||[]).slice(0,n).map(t=>(t.score||[]).join("-")).filter(Boolean);
+  if(!rows.length&&p&&p.pred_score) rows.push(p.pred_score.join("-"));
+  return rows.join(" · ");
+}
+function matchTakeaway(m){
+  const p=m.pred||{}; const scores=likelyScoresLabel(p); const pick=pickLabel(m,p)||"暂无明确方向";
+  if(m.score) return `赛前倾向 ${pick}，Top3 比分给到 ${scores||"暂无"}，实际 ${m.score.join("-")}。`;
+  return `${pick} 是 AI 第一倾向，可能比分集中在 ${scores||"待更新"}。`;
+}
+window.aiIcon = (s) => `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#1a2a18"/><text x="12" y="16" text-anchor="middle" fill="#b8f53d" font-size="11" font-family="monospace">${(s||"?").slice(0,1).toUpperCase()}</text></svg>`;
+window.WC_QR_DATA = "site-qr.png";
+const publicAgent = (b) => ({ name: b?.login||"AI", login: b?.login, model: b?.login });
+function betOutcomeKey(b){ return b.pick || "H"; }
+const S = { byMatch: {} };
+function matchAgentVotes(m){
+  const groups={H:[],D:[],A:[]};
+  (S.byMatch[m.match]||[]).forEach(b=>{ (groups[betOutcomeKey(b)]||groups.D).push(b); });
+  return groups;
+}
+
+// ====== 真实 CSS（从 index.html 复制 .match-poster 全套）======
+const CSS = `
+  .match-poster { position: relative; width: 900px; height: 1200px; overflow: hidden;
+    color: var(--ink);
+    background:
+      radial-gradient(720px 420px at 18% 4%, rgba(184,245,61,.10), transparent 58%),
+      radial-gradient(620px 360px at 86% 12%, rgba(255,215,94,.07), transparent 62%),
+      radial-gradient(900px 700px at 50% 120%, rgba(127,179,36,.10), transparent 60%),
+      linear-gradient(160deg, #0a1510 0%, #07100b 52%, #050c08 100%);
+    border-radius: 6px; padding: 0 64px;
+    display: flex; flex-direction: column;
+    box-shadow: 0 30px 80px rgba(0,0,0,.55); }
+  .match-poster::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 4px;
+    background: linear-gradient(90deg, transparent, var(--lime) 30%, var(--lime-dark) 70%, transparent);
+    opacity: .85; pointer-events: none; }
+  .match-poster > * { position: relative; z-index: 1; }
+  .mp-top { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding-top: 40px; }
+  .mp-brand { display: inline-flex; align-items: center; gap: 12px; font-family: var(--mono);
+    font-size: 14px; letter-spacing: .22em; color: var(--dim); }
+  .mp-brand b { color: #06120a; background: var(--lime); padding: 4px 9px; border-radius: 2px; font-weight: 700; }
+  .mp-meta { font-family: var(--mono); font-size: 14px; color: var(--dim);
+    letter-spacing: .04em; text-align: right; line-height: 1.6;
+    display: flex; flex-direction: column; align-items: flex-end; }
+  .mp-meta b { color: var(--ink); font-weight: 600; }
+  .mp-meta span { white-space: nowrap; }
+  .mp-versus { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+    gap: 28px; margin-top: 110px; }
+  .mp-side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .mp-side.right { align-items: flex-end; }
+  .mp-flag { font-size: 76px; line-height: 1; filter: drop-shadow(0 6px 18px rgba(0,0,0,.4)); }
+  .mp-name { font-weight: 900; font-size: 60px; line-height: 1; color: var(--ink);
+    letter-spacing: .02em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mp-center { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .mp-center .mp-vs { font-family: var(--mono); font-weight: 600; font-size: 92px; line-height: .9;
+    color: var(--ink); letter-spacing: .04em; text-shadow: 0 0 40px rgba(184,245,61,.25); }
+  .mp-center .mp-vs.is-score { color: var(--lime); }
+  .mp-center .mp-pred { font-family: var(--mono); font-size: 16px; letter-spacing: .18em;
+    color: var(--lime); border-top: 1px solid rgba(184,245,61,.4);
+    border-bottom: 1px solid rgba(184,245,61,.4); padding: 6px 14px; margin-top: 6px; }
+  .mp-center .mp-pred b { font-weight: 700; font-size: 19px; }
+  .mp-rule { margin: 64px 0 34px; height: 1px;
+    background: linear-gradient(90deg, transparent, var(--line-strong) 20%, var(--line-strong) 80%, transparent); }
+  .mp-prob-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px; }
+  .mp-prob-label { font-family: var(--mono); font-size: 13px; letter-spacing: .22em; color: var(--faint); }
+  .mp-prob-side { display: flex; align-items: baseline; gap: 16px; }
+  .mp-prob-h { font-family: var(--mono); font-weight: 600; font-size: 26px; color: var(--lime); }
+  .mp-prob-h small { font-size: 14px; color: var(--dim); margin-left: 6px; letter-spacing: .12em; }
+  .mp-prob-rest { font-family: var(--mono); font-size: 14px; color: var(--dim); letter-spacing: .08em; }
+  .mp-bar { display: flex; height: 30px; border-radius: 6px; overflow: hidden; background: rgba(214,255,222,.06); }
+  .mp-bar i { display: block; height: 100%; }
+  .mp-bar .h { background: var(--lime); }
+  .mp-bar .d { background: var(--draw); }
+  .mp-bar .a { background: var(--hot); }
+  .mp-vs-stack { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+  .mp-vs-row { font-family: var(--mono); font-weight: 600; letter-spacing: .04em; }
+  .mp-vs-row.top { font-size: 76px; line-height: 1.02; color: var(--lime);
+    text-shadow: 0 0 40px rgba(184,245,61,.25); margin: 6px 0; }
+  .mp-vs-row.minor { font-size: 30px; line-height: 1.1; color: var(--faint); }
+  .mp-vs-row.minor:empty { display: none; }
+  .mp-votes { margin-top: 30px; display: flex; align-items: center; gap: 14px; }
+  .mp-avatars { display: flex; }
+  .mp-avatars .mp-avatar { width: 46px; height: 46px; border-radius: 50%; margin-left: -10px;
+    border: 2px solid var(--bg); display: flex; align-items: center; justify-content: center;
+    overflow: hidden; background: #0e1c14; }
+  .mp-avatars .mp-avatar:first-child { margin-left: 0; }
+  .mp-avatars .mp-avatar.pick-H { border-color: rgba(184,245,61,.7); background: radial-gradient(circle at 30% 30%, #1c2e16, #0e1c14); }
+  .mp-avatars .mp-avatar.pick-D { border-color: rgba(135,166,144,.66); }
+  .mp-avatars .mp-avatar.pick-A { border-color: rgba(255,122,82,.7); background: radial-gradient(circle at 30% 30%, #2a1612, #160c0a); }
+  .mp-avatars .mp-avatar svg, .mp-avatars .mp-avatar img { width: 100%; height: 100%; display: block; }
+  .mp-vote-text { font-family: var(--mono); font-size: 15px; color: var(--dim); letter-spacing: .04em; line-height: 1.5; }
+  .mp-vote-text b { color: var(--ink); font-weight: 600; }
+  .mp-take { margin-top: auto; position: relative; padding: 0 8px 0 64px; }
+  .mp-take::before { content: "\\201C"; position: absolute; left: 0; top: -30px;
+    font-family: Georgia, serif; font-size: 120px; line-height: 1; color: var(--lime); opacity: .9; }
+  .mp-take p { margin: 0; font-weight: 700; font-size: 34px; line-height: 1.45; color: var(--ink); }
+  .mp-take p::after { content: "\\201D"; font-family: Georgia, serif; color: var(--lime); margin-left: 4px; }
+  .mp-foot { margin-top: 44px; display: flex; align-items: flex-end; justify-content: space-between;
+    gap: 20px; padding-bottom: 44px; }
+  .mp-site { font-family: var(--mono); font-size: 16px; line-height: 1.7; color: var(--dim); }
+  .mp-site .mp-url { color: var(--lime); font-weight: 600; letter-spacing: .04em; }
+  .mp-site .mp-sub { font-size: 12px; color: var(--faint); letter-spacing: .1em; }
+  .mp-qr { width: 96px; height: 96px; border-radius: 4px; background: #fff; padding: 8px;
+    box-shadow: 0 0 0 1px rgba(255,255,255,.2); }
+  .mp-qr img { width: 100%; height: 100%; display: block; }
+`;
+document.getElementById('real-poster-css').textContent = CSS;
+</script>
+<script>
+// ====== 真实 buildMatchPoster（与 index.html 完全一致）======
+function buildMatchPoster(m) {
+  const p = m.pred || {};
+  const dt = new Date(String(m.date_utc || "").replace(" ", "T"));
+  const time = Number.isNaN(dt.getTime()) ? "" : dt.toLocaleString("zh-CN", {
+    month: "long", day: "numeric", weekday: "short", hour: "2-digit", minute: "2-digit"
+  });
+  const stage = `${STAGE_NAME[m.stage] || ""}${m.group ? " · " + m.group + "组" : ""}${m.round ? " 第" + m.round + "轮" : ""}`;
+  const stageMeta = `${stage ? `<span class="mp-stage-line"><b>${esc(stage)}</b></span>` : ""}${time ? `<span>${esc(time)}</span>` : ""}`;
+
+  const topScores = (p.top_scores || []).slice(0, 3)
+    .map(t => (t.score || []).join("-")).filter(Boolean);
+  if (!topScores.length && p.pred_score) topScores.push(p.pred_score.join("-"));
+
+  const center = m.score
+    ? `<div class="mp-vs is-score">${m.score[0]}:${m.score[1]}</div><div class="mp-pred">终场</div>`
+    : topScores.length >= 2
+      ? `<div class="mp-vs-stack">
+          <span class="mp-vs-row minor">${esc(topScores[1].replace("-", ":"))}</span>
+          <span class="mp-vs-row top">${esc(topScores[0].replace("-", ":"))}</span>
+          <span class="mp-vs-row minor">${esc(topScores[2] ? topScores[2].replace("-", ":") : "")}</span>
+        </div><div class="mp-pred">预测比分</div>`
+      : topScores.length === 1
+        ? `<div class="mp-vs is-score">${esc(topScores[0].replace("-", ":"))}</div><div class="mp-pred">预测比分</div>`
+        : `<div class="mp-vs">VS</div>`;
+
+  const ph = p.p_home || 0, pd = p.p_draw || 0, pa = p.p_away || 0;
+  const probBlock = (ph || pd || pa) ? `
+    <div class="mp-prob-head">
+      <span class="mp-prob-label">AI 胜率预测</span>
+      <span class="mp-prob-side">
+        <span class="mp-prob-h">${pct(ph, 0)}<small>主胜</small></span>
+        <span class="mp-prob-rest">平 ${pct(pd, 0)} · 客胜 ${pct(pa, 0)}</span>
+      </span>
+    </div>
+    <div class="mp-bar">
+      <i class="h" style="width:${ph * 100}%"></i>
+      <i class="d" style="width:${pd * 100}%"></i>
+      <i class="a" style="width:${pa * 100}%"></i>
+    </div>` : "";
+
+  const votes = matchAgentVotes(m);
+  const avatar = (b, k) => {
+    const a = publicAgent(b);
+    const name = a.name || a.login || "?";
+    const icon = (window.aiIcon ? window.aiIcon(a.model || a.login) : null) || "AI";
+    return `<span class="mp-avatar pick-${k}" title="${esc(name)}">${icon}</span>`;
+  };
+  const voteTotal = votes.H.length + votes.D.length + votes.A.length;
+  const voteAvatars = ["H", "D", "A"].flatMap(k => votes[k].map(b => avatar(b, k))).join("");
+  const voteSummary = (() => {
+    if (!voteTotal) return "暂无 AI 投票";
+    const top = [["H", votes.H.length, "主胜"], ["D", votes.D.length, "平"], ["A", votes.A.length, "客胜"]].sort((a, b) => b[1] - a[1])[0];
+    return `<b>${voteTotal}</b> 个 AI 投票 · <b>${top[1]}</b> 看好${top[2]}`;
+  })();
+  const voteBlock = voteAvatars ? `
+    <div class="mp-votes">
+      <div class="mp-avatars">${voteAvatars}</div>
+      <div class="mp-vote-text">${voteSummary}</div>
+    </div>` : "";
+
+  const take = matchTakeaway(m);
+  const takeBlock = take ? `<div class="mp-take"><p>${esc(take)}</p></div>` : "";
+  const qrImg = window.WC_QR_DATA ? `<img src="${window.WC_QR_DATA}" alt="二维码">` : "";
+
+  return `<div class="match-poster" data-poster-match="${m.match}">
+    <div class="mp-top">
+      <div class="mp-brand"><b>AI</b><span>WORLDCUP · 2026</span></div>
+      <div class="mp-meta">${stageMeta}</div>
+    </div>
+    <div class="mp-versus">
+      <div class="mp-side">
+        <span class="mp-flag">${FLAG[m.home] || ""}</span>
+        <div class="mp-name">${esc(zh(m.home))}</div>
+      </div>
+      <div class="mp-center">${center}</div>
+      <div class="mp-side right">
+        <span class="mp-flag">${FLAG[m.away] || ""}</span>
+        <div class="mp-name">${esc(zh(m.away))}</div>
+      </div>
+    </div>
+    <div class="mp-rule"></div>
+    ${probBlock}
+    ${voteBlock}
+    ${takeBlock}
+    <div class="mp-foot">
+      <div class="mp-site">
+        <div class="mp-url">wc.lightai.io</div>
+        <div class="mp-sub">看全部 AI 预测记录</div>
+      </div>
+      <div class="mp-qr">${qrImg}</div>
+    </div>
+  </div>`;
+}
+
+// ====== 测试数据 ======
+S.byMatch[1] = [
+  {kind:"agent", login:"claude", pick:"H"}, {kind:"agent", login:"gpt", pick:"H"},
+  {kind:"agent", login:"gemini", pick:"H"}, {kind:"agent", login:"doubao", pick:"H"},
+  {kind:"agent", login:"kimi", pick:"A"},
+];
+
+document.getElementById("a").innerHTML = buildMatchPoster({
+  match: 1, home: "Germany", away: "Curacao", stage: "group", group: "E", round: 1,
+  date_utc: "2026-06-15 01:00:00", score: null,
+  pred: { p_home: 0.78, p_draw: 0.15, p_away: 0.07, pick: "H",
+    pred_score: [2,0], top_scores: [{score:[2,0]},{score:[3,0]},{score:[2,1]}] }
+});
+
+S.byMatch[2] = [{kind:"agent", login:"a", pick:"H"}, {kind:"agent", login:"b", pick:"D"}];
+document.getElementById("b").innerHTML = buildMatchPoster({
+  match: 2, home: "Brazil", away: "Argentina", stage: "qf", group: null, round: null,
+  date_utc: "2026-06-20 03:00:00", score: [3,1],
+  pred: { p_home: 0.55, p_draw: 0.25, p_away: 0.20, pick: "H",
+    pred_score: [2,1], top_scores: [{score:[2,1]},{score:[1,1]}] }
+});
+</script>
+</body>
+</html>
