@@ -72,9 +72,15 @@ def _chat_completion(gateway_cfg: dict, model_cfg: dict, system: str, user: str,
     body.update(gateway_cfg.get("extra") or {})
     body.update(model_cfg.get("extra") or {})
 
+    # base_url/api_key 优先取 per-model（兼容多网关结构），顶层作 fallback
+    base_url = (model_cfg.get("base_url") or gateway_cfg.get("base_url") or "").rstrip("/")
+    api_key = model_cfg.get("api_key") or gateway_cfg.get("api_key")
+    if not base_url:
+        raise RuntimeError(
+            f"{model_cfg.get('id')}: 缺少 base_url（顶层和 per-model 均无）")
     out = _post(
-        gateway_cfg["base_url"].rstrip("/") + "/chat/completions",
-        _auth_headers(gateway_cfg.get("api_key")),
+        base_url + "/chat/completions",
+        _auth_headers(api_key),
         body,
     )
     usage = out.get("usage") or {}
@@ -101,8 +107,14 @@ class Gateway:
                 or os.getenv("GATEWAY_API_KEY")
             )
 
-        if not gateway_cfg.get("base_url"):
-            raise RuntimeError("缺少 gateway.base_url，请指向 pi-serve 的 /v1 地址")
+        # 顶层无 base_url 时，只要有任一 model 自带 base_url 即放行；
+        # 具体校验延迟到 _chat_completion 按该 model 的配置判断
+        has_top = bool(gateway_cfg.get("base_url"))
+        has_any_model = any(m.get("base_url")
+                            for m in gateway_cfg.get("models", []))
+        if not has_top and not has_any_model:
+            raise RuntimeError(
+                "缺少 gateway.base_url，且无 model 配置 base_url")
 
         self.gateway_cfg = gateway_cfg
         self.models = {
