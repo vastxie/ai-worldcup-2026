@@ -28,7 +28,7 @@ MIN_LAMBDA = 0.08       # 单队期望进球下限
 PENALTY_ELO_WEIGHT = 0.25  # 点球大战中 Elo 优势的衰减权重
 DIXON_COLES_RHO = -0.10    # 低比分相关性修正（负值 → 抬高 0-0/1-1）
 STYLE_MIN, STYLE_MAX = 0.80, 1.25  # 风格(开放度)对总进球的调节范围
-TOTAL_MIN, TOTAL_MAX = 0.8, 5.5     # 盘口/情报总进球校准的安全边界
+TOTAL_MIN, TOTAL_MAX = 0.8, 5.5     # 市场参考/情报总进球校准的安全边界
 SHARE_SHIFT_MAX = 0.12              # attack/defense 对进球份额的最大扰动
 
 

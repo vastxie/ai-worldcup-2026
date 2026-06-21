@@ -187,7 +187,7 @@ def build_schedule(state: dict) -> list[dict]:
                                  "venue", "home", "away", "slot_home",
                                  "slot_away", "score", "winner")}
         rec = rec_by_match.get(m["match"])
-        if rec:  # 已赛：用赛前预测（含市场盘口时即融合版）
+        if rec:  # 已赛：用赛前预测（含市场市场参考时即融合版）
             row["pred"] = {"p_home": rec["p_home"], "p_draw": rec["p_draw"],
                            "p_away": rec["p_away"],
                            "pick": rec["pick"],
@@ -249,6 +249,7 @@ def update_history(sim_out: dict, played: int, sims: int) -> list[dict]:
 # ------------------------------------------------------------------ outputs --
 
 def write_outputs(payload: dict) -> None:
+    payload = report._public_text(payload)
     out_dir = ROOT / "out"
     out_dir.mkdir(exist_ok=True)
     atomic_write_text(out_dir / "results.json",
@@ -333,13 +334,16 @@ def print_report(payload: dict, published: bool = True) -> None:
 
 def run(sims: int, seed: int | None, do_fetch: bool,
         workers: int | None = None, dry_run: bool = False,
-        force_publish: bool = False) -> dict:
+        force_publish: bool = False,
+        publish_content: bool = True) -> dict:
     with isolated_db(dry_run):
-        return _run(sims, seed, do_fetch, workers, dry_run, force_publish)
+        return _run(sims, seed, do_fetch, workers, dry_run, force_publish,
+                    publish_content)
 
 
 def _run(sims: int, seed: int | None, do_fetch: bool,
-         workers: int | None, dry_run: bool, force_publish: bool) -> dict:
+         workers: int | None, dry_run: bool, force_publish: bool,
+         publish_content: bool) -> dict:
     db.init_db()
     # 自举：库为空（如服务器首次切换）时自动从 JSON 迁移，保护 cron 不踩空
     conn = db.connect()
@@ -351,14 +355,14 @@ def _run(sims: int, seed: int | None, do_fetch: bool,
         migrate.main()
 
     if do_fetch and dry_run:
-        print("  [dry-run] 跳过联网同步，用本地数据试算（不消耗赔率 API 配额）")
+        print("  [dry-run] 跳过联网同步，用本地数据试算（不消耗回报系数 API 配额）")
     elif do_fetch:
         fetch.sync()
         odds.sync()
 
     settled = db.settle_finished_bets()
     if settled:
-        print(f"  [bets] 已结算 {settled} 笔投注")
+        print(f"  [bets] 已结算 {settled} 笔预测")
 
     publish_played = sum(1 for m in db.load_matches()
                          if m["score"] and m["home"] and m["away"])
@@ -394,7 +398,10 @@ def _run(sims: int, seed: int | None, do_fetch: bool,
         print("  [dry-run] 已完成计算，未写入真实数据库或发布产物")
     else:
         write_outputs(payload)
-        report.update_all(payload)
+        if publish_content:
+            report.update_all(payload)
+        else:
+            report._publish()
     print_report(payload, published=not dry_run)
     return payload
 

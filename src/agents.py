@@ -1,7 +1,7 @@
-"""AI 选手框架：用统一网关驱动多个大模型参与投注与战报圆桌。
+"""AI 选手框架：用统一网关驱动多个大模型参与预测与战报圆桌。
 
 设计原则：
-- AI 与人类完全同规则：同初始积分、同赔率、同开球锁盘，无任何后门。
+- AI 与人类完全同规则：同初始积分、同回报系数、同开球锁盘，无任何后门。
 - 每个 agent 只能看到【公共数据区】+【自己的私有笔记】；
   笔记支持增删改查，跨唤醒持久（这是它们的"记忆"）。
 - 决策协议与厂商无关：模型只需输出一个 JSON 对象（不依赖 function calling）。
@@ -10,7 +10,7 @@
   "arena": {
     "agents": [
       {"id": "claude-bettor", "name": "Claude", "model": "claude",
-       "persona": "谨慎的价值投资者……"},
+       "persona": "谨慎的价值支持者……"},
       ...
     ],
     "daily_token_budget": 200000,   # 每个 agent 每日 token 上限
@@ -36,16 +36,16 @@ from .gateway import Gateway
 
 ROOT = Path(__file__).resolve().parent.parent
 
-SYSTEM_BENCH = """你是「{name}」，参加 2026 世界杯虚拟积分投注竞技场的 AI 选手（本色组）。
+SYSTEM_BENCH = """你是「{name}」，参加 2026 世界杯虚拟积分预测竞技场的 AI 选手（本色组）。
 不设任何人设——完全基于你自己的真实判断决策，这是对模型预测能力的公开基准测试。
 
 规则：
-- 你和人类玩家同场竞技：初始 1000 积分，赔率=AI 预测概率的倒数，开球即锁盘。
-- 单次唤醒最多下 {max_bets} 注，注额 10~你的全部余额；认为没有价值就不下注。
+- 你和人类玩家同场竞技：初始 1000 积分，回报系数=AI 预测概率的倒数，开球即锁盘。
+- 单次唤醒最多下 {max_bets} 注，投入积分 10~你的全部余额；认为没有价值就不提交预测。
 - 你有一块私有笔记区（别的选手看不到），跨唤醒持久，是你唯一的长期记忆。
-- 投注理由会公开展示，40 字以内。
+- 预测理由会公开展示，40 字以内。
 
-你将收到公共数据（赛程/概率/赔率/赛果/榜单/最近投注/战报/情报区索引）、
+你将收到公共数据（赛程/概率/回报系数/赛果/榜单/最近预测/战报/情报区索引）、
 你的结算反馈和私有笔记。
 只输出一个 JSON 对象（不要任何其他文字、不要 markdown 代码块），结构：
 {{
@@ -55,21 +55,21 @@ SYSTEM_BENCH = """你是「{name}」，参加 2026 世界杯虚拟积分投注�
   "notes_delete": [1],
   "bets":         [{{"match_no": 5, "pick": "H|D|A", "stake": 100, "reason": "..."}}]
 }}
-所有字段都可为空数组。本色组不参与圆桌评论，专注投注决策。
+所有字段都可为空数组。本色组不参与圆桌评论，专注预测决策。
 笔记请保持精炼（建议 ≤20 条核心结论，过时的及时删改）。"""
 
-SYSTEM_TMPL = """你是「{name}」，一个参加 2026 世界杯虚拟积分投注竞技场的 AI 选手（娱乐组）。
+SYSTEM_TMPL = """你是「{name}」，一个参加 2026 世界杯虚拟积分预测竞技场的 AI 选手（娱乐组）。
 人设：{persona}
-请始终保持人设的策略风格和说话腔调（包括投注理由和圆桌发言）。
+请始终保持人设的策略风格和说话腔调（包括预测理由和圆桌发言）。
 
 规则：
-- 你和人类玩家同场竞技：初始 1000 积分，赔率=AI 预测概率的倒数，开球即锁盘。
-- 量力而行：单次唤醒最多下 {max_bets} 注，注额 10~你的全部余额；不下注完全合法。
+- 你和人类玩家同场竞技：初始 1000 积分，回报系数=AI 预测概率的倒数，开球即锁盘。
+- 量力而行：单次唤醒最多下 {max_bets} 注，投入积分 10~你的全部余额；不提交预测完全合法。
 - 你有一块私有笔记区（别的选手看不到），用来记策略、教训、观察——这是你唯一的跨日记忆，请善用。
-- 投注理由会公开展示在网站上，写得有观点些，但 40 字以内。
+- 预测理由会公开展示在网站上，写得有观点些，但 40 字以内。
 
-现在是投注时间（圆桌讨论另有专场）。你将收到公共数据（赛程/概率/赔率/赛果/
-榜单/最近投注/最近3期战报/圆桌评论/情报区索引）、你的结算反馈和私有笔记。
+现在是预测时间（圆桌讨论另有专场）。你将收到公共数据（赛程/概率/回报系数/赛果/
+榜单/最近预测/最近3期战报/圆桌评论/情报区索引）、你的结算反馈和私有笔记。
 只输出一个 JSON 对象（不要任何其他文字、不要 markdown 代码块），结构：
 {{
   "read_intel":   [想读全文的情报id, 最多3个]（可选：申请后系统会把全文发给你再让你做最终决策）,
@@ -78,7 +78,7 @@ SYSTEM_TMPL = """你是「{name}」，一个参加 2026 世界杯虚拟积分投
   "notes_delete": [1],
   "bets":         [{{"match_no": 5, "pick": "H|D|A", "stake": 100, "reason": "..."}}]
 }}
-所有字段都可为空数组。投注理由请保持你的人设腔调。
+所有字段都可为空数组。预测理由请保持你的人设腔调。
 笔记请保持精炼（建议 ≤20 条核心结论，过时的及时删改）。"""
 
 
@@ -118,10 +118,10 @@ def _public_data() -> dict:
             "对阵": f"{name[m['home']]} vs {name[m['away']]}",
             "开球UTC": m["date_utc"],
             "AI概率": {"主胜H": p["p_home"], "平D": p["p_draw"], "客胜A": p["p_away"]},
-            "赔率": {"H": round(1 / max(p["p_home"], 0.02), 2),
+            "回报系数": {"H": round(1 / max(p["p_home"], 0.02), 2),
                     "D": round(1 / max(p["p_draw"], 0.02), 2),
                     "A": round(1 / max(p["p_away"], 0.02), 2)},
-            "市场盘口": p.get("market"),
+            "市场市场参考": p.get("market"),
             # Codex 微调透明公示：选手可选择跟随或反向
             "Codex微调": (advisor_note(p["fable"]) if p.get("fable") else None),
             "看点": None,
@@ -170,7 +170,7 @@ def _public_data() -> dict:
             {"名字": r["name"] or r["login"], "类型": r["kind"],
              "净资产": r["net_worth"], "ROI": r["roi"]}
             for r in db.leaderboard(10)],
-        "全站最近投注": recent,
+        "全站最近预测": recent,
         "最近3期战报": [{"期数": r["no"], "日期": r["date"], "正文": r["report"]}
                       for r in reports[-3:]],
         "圆桌最近评论": [
@@ -233,8 +233,8 @@ def run_agent(agent_cfg: dict, gw: Gateway, arena_cfg: dict,
                       and (b["settled_at"] or "") >= cutoff]
     pnl = sum(b["payout"] - b["stake"] for b in recent_settled)
     settlement = {
-        "明细": [{"场次": b["match_no"], "方向": b["pick"], "注额": b["stake"],
-                "赔率": b["odds"], "结果": "赢" if b["payout"] else "输",
+        "明细": [{"场次": b["match_no"], "方向": b["pick"], "投入积分": b["stake"],
+                "回报系数": b["odds"], "结果": "赢" if b["payout"] else "输",
                 "净盈亏": b["payout"] - b["stake"]} for b in recent_settled],
         "本期净盈亏": pnl,
     } if recent_settled else "（无新结算）"
@@ -249,10 +249,10 @@ def run_agent(agent_cfg: dict, gw: Gateway, arena_cfg: dict,
 
     ctx = {
         "你的状态": {"余额": me["balance"],
-                   "历史投注": [{"场次": b["match_no"], "方向": b["pick"],
-                               "注额": b["stake"], "赔率": b["odds"],
+                   "历史预测": [{"场次": b["match_no"], "方向": b["pick"],
+                               "投入积分": b["stake"], "回报系数": b["odds"],
                                "已结": bool(b["settled"]),
-                               "派彩": b["payout"]} for b in my_bets]},
+                               "结算得分": b["payout"]} for b in my_bets]},
         "结算反馈": settlement,
         "你的私有笔记": notes,
         "公共数据": public,
@@ -297,7 +297,7 @@ def run_agent(agent_cfg: dict, gw: Gateway, arena_cfg: dict,
         if db.agent_note_delete(me["id"], int(nid)):
             log.append(f"删笔记#{nid}")
 
-    # 下注（与人类同规则校验）
+    # 提交预测（与人类同规则校验）
     for b in (actions.get("bets") or [])[:max_bets]:
         try:
             match_no = int(b["match_no"])
@@ -305,15 +305,15 @@ def run_agent(agent_cfg: dict, gw: Gateway, arena_cfg: dict,
             stake = int(b["stake"])
             entry = _kickoff_ok(match_no, public)
             if pick not in ("H", "D", "A") or not entry:
-                log.append(f"弃注#{match_no}(无效)")
+                log.append(f"放弃预测#{match_no}(无效)")
                 continue
             stake = max(10, min(stake, db.get_user(me["id"])["balance"]))
-            odds_val = entry["赔率"][pick]
+            odds_val = entry["回报系数"][pick]
             db.place_bet(me["id"], match_no, pick, stake, odds_val,
                          reason=str(b.get("reason", ""))[:80])
-            log.append(f"下注#{match_no} {pick} {stake}@{odds_val}")
+            log.append(f"提交预测#{match_no} {pick} {stake}@{odds_val}")
         except (ValueError, KeyError) as exc:
-            log.append(f"弃注({exc})")
+            log.append(f"放弃预测({exc})")
 
     # 战报圆桌跟评（仅娱乐组；每期限 1 条；支持回复引用）
     raw_comment = actions.get("comment")

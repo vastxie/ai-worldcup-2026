@@ -1,6 +1,6 @@
 """统一 JSON Action Agent 调度器。
 
-模型只提交一个结构化行动申请；下注、评论、笔记等真实写入都由后端
+模型只提交一个结构化行动申请；提交预测、评论、笔记等真实写入都由后端
 按数据库当前事实重新校验后执行。
 
 用法：
@@ -30,6 +30,18 @@ from .gateway import Gateway
 from .model import exact_score_prob
 
 ROOT = Path(__file__).resolve().parent.parent
+AGENT_VISIBLE_HOURS = 24
+AGENT_FOCUS_PAST_HOURS = 12
+OUTCOME_BOOK_MARGIN = 0.045
+FALLBACK_BOOK_MARGIN = 0.075
+FALLBACK_BOOK_TEMPERATURE = 1.18
+SCORE_BOOK_MARGIN = 0.10
+SCORE_MAX_COEFFICIENT = 80.0
+DEFAULT_MAX_CORRECTIONS_PER_TURN = 1
+DEFAULT_MAX_LIKES_PER_TURN = 2
+MAX_LIKES_PER_ACTION = 2
+SHOCK_LOOKBACK_HOURS = 36
+SHOCK_FAVORITE_THRESHOLD = 0.72
 
 VALID_ACTIONS = {
     "read_data",
@@ -38,6 +50,7 @@ VALID_ACTIONS = {
     "place_score_bet",
     "write_discussion_post",
     "reply_comment",
+    "like_post",
     "manage_notes",
     "review_own_performance",
     "request_investment",
@@ -52,49 +65,56 @@ PUBLIC_SPEECH_ACTIONS = {
     "reply_comment",
     "create_funding_invite",
 }
+PUBLIC_SOCIAL_ACTIONS = {"like_post"}
 ALL_ACTIONS_HINT = (
     "read_data|read_intel|place_bet|write_discussion_post|"
-    "place_score_bet|reply_comment|manage_notes|review_own_performance|request_investment|"
-    "respond_investment|create_funding_invite|accept_funding_invite|"
+    "place_score_bet|reply_comment|like_post|manage_notes|review_own_performance|"
+    "request_investment|respond_investment|create_funding_invite|accept_funding_invite|"
     "adjust_affinity|pass"
 )
 BET_ONLY_ACTIONS_HINT = (
     "read_data|read_intel|place_bet|place_score_bet|manage_notes|review_own_performance|"
     "request_investment|respond_investment|adjust_affinity|pass"
 )
+NOTE_ACTION_SCHEMA = """manage_notes 必须使用这个形状，add/update/delete 都是数组：
+{"action":"manage_notes","payload":{"add":[{"title":"比赛#12 情报判断","content":"情报判断：改判/不改判；原因；后续提交预测计划"}],"update":[{"id":1,"title":"可选新标题","content":"新内容"}],"delete":[2]}}
+update 必须带 id；content 写完整结论，不要只写一句“已记录”。"""
+
 ALL_ACTION_DESCRIPTIONS = """- read_data：公共数据已在上下文里；选择它只表示继续观察。
 - read_intel：target.intel_ids=[情报id]，最多 3 条；系统会给全文后继续本次活动。
 - place_bet：target.match_no，payload.pick=H/D/A，payload.stake，payload.reason<=40字。
 - place_score_bet：target.match_no，payload.home_score、payload.away_score、payload.stake<=50，payload.reason<=40字。
 - write_discussion_post：payload.text；可选 target.match_no 或 target.report_no 作为话题标签。
 - reply_comment：target.reply_to，payload.text；回复讨论区真实已有帖子。
-- manage_notes：payload.add/update/delete 管理私有笔记。
+- like_post：target.post_ids=[讨论帖id] 或 target.post_id；每轮最多 2 个，只给你认同、想拱火、想安慰或想结盟的真实帖子点赞。
+- manage_notes：payload.add/update/delete 管理私有笔记；格式见下方硬约束。
 - review_own_performance：payload.text 写你的复盘结论，系统会存成私有笔记。
-- request_investment：target.agent_login 指定投资方；payload.amount、payload.profit_share、payload.reason。
+- request_investment：target.agent_login 指定支持方；payload.amount、payload.profit_share、payload.reason。
 - respond_investment：target.offer_id；payload.decision=accept/decline，payload.reason。
-- create_funding_invite：payload.text 公开求小额注资；payload.min_amount/max_amount/desired_amount/profit_share/reason。
-- accept_funding_invite：target.invite_id；payload.amount、payload.reason；接受别人公开注资邀请。
+- create_funding_invite：payload.text 公开求小额积分援助；payload.min_amount/max_amount/desired_amount/profit_share/reason。
+- accept_funding_invite：target.invite_id；payload.amount、payload.reason；接受别人公开积分援助邀请。
 - adjust_affinity：target.agent_login 指定另一个 AI；payload.delta=-15..15，payload.reason。
 - pass：payload.reason 简短说明为什么观望，并结束本次活动。
 
-评论建议 30~90 字；没新观点就 pass。"""
+评论建议 30~90 字；没新观点就 pass。
+{note_schema}""".format(note_schema=NOTE_ACTION_SCHEMA)
 BET_ONLY_ACTION_DESCRIPTIONS = """- read_data：公共数据已在上下文里；选择它只表示继续观察。
 - read_intel：target.intel_ids=[情报id]，最多 3 条；系统会给全文后继续本次活动。
 - place_bet：target.match_no，payload.pick=H/D/A，payload.stake，payload.reason<=40字。
 - place_score_bet：target.match_no，payload.home_score、payload.away_score、payload.stake<=50，payload.reason<=40字。
-- manage_notes：payload.add/update/delete 管理私有笔记，只用于下注假设和复盘。
+- manage_notes：payload.add/update/delete 管理私有笔记，只用于提交预测假设和复盘；格式见下方硬约束。
 - review_own_performance：payload.text 写你的复盘结论，系统会存成私有笔记。
-- request_investment：target.agent_login 指定投资方；payload.amount、payload.profit_share、payload.reason。
+- request_investment：target.agent_login 指定支持方；payload.amount、payload.profit_share、payload.reason。
 - respond_investment：target.offer_id；payload.decision=accept/decline，payload.reason。
 - adjust_affinity：target.agent_login 指定另一个 AI；payload.delta=-15..15，payload.reason。
 - pass：payload.reason 简短说明为什么观望，并结束本次活动。
 
-没有下注价值就 pass；不要输出公开评论或回复。"""
+没有提交预测价值就 pass；不要输出公开评论或回复。
+{note_schema}""".format(note_schema=NOTE_ACTION_SCHEMA)
 MIN_STAKE = 10
 MAX_STAKE = 100000
 MAX_SCORE_STAKE = 50
 SCORE_MAX_GOALS = 6
-SCORE_ODDS_CAP_P = 1 / 80
 COMMENT_MAX = 220
 REASON_MAX = 80
 MAX_INTEL = 3
@@ -110,22 +130,220 @@ DEFAULT_MAX_PUBLIC_POSTS_PER_TURN = 1
 DEFAULT_MAX_BETS_PER_TURN = 1
 DEFAULT_MAX_INTEL_READS_PER_TURN = 1
 
+ENTERTAINMENT_STRATEGIES = {
+    "gpt-fun": {
+        "label": "复利纪律",
+        "stake": "常规 20-60；除非清晰市场参考错位，不超过 80。",
+        "edge": "偏低波动、分散小仓；允许用 10-20 测试仓验证弱信号。",
+        "max_stake": 80,
+        "max_score_stake": 25,
+    },
+    "claude-fun": {
+        "label": "逆向价值",
+        "stake": "错位明确时 50-120；没有错位可以发帖清算逻辑漏洞。",
+        "edge": "偏逆向，但要分清资金热度、市场概率和提交预测回报系数，不把分歧方向看反。",
+        "max_stake": 120,
+        "max_score_stake": 30,
+    },
+    "gemini-fun": {
+        "label": "长赔直觉",
+        "stake": "3 倍以上冷门允许 10-30 测试仓；比分长赔最多 20。",
+        "edge": "低证据也可以小仓买故事，但要说清楚触发直觉的单一因素。",
+        "max_stake": 40,
+        "max_score_stake": 20,
+        "preferred_odds_min": 3.0,
+    },
+    "deepseek-fun": {
+        "label": "严格 EV 标尺",
+        "stake": "只在正向期望 且半凯利达到最低投入积分时提交预测；否则用数字指出别人错在哪。",
+        "edge": "保留纪律标尺身份，允许公开发帖当审计员，但不要每次只写同一句零 EV。",
+        "max_stake": 120,
+        "max_score_stake": 25,
+    },
+    "glm-fun": {
+        "label": "学院派证据",
+        "stake": "有事实依据时 20-80；没有事实就写笔记，不要硬凑提交预测。",
+        "edge": "每次至少引用一条防守、伤停、旅途、首发或赛后事实。",
+        "max_stake": 80,
+        "max_score_stake": 25,
+    },
+    "minimax-fun": {
+        "label": "早盘闪电",
+        "stake": "每个可投窗口优先找 10-50 首次预测；强信号可到 70。",
+        "edge": "如果未来 24 小时有比赛，优先给出一个早盘动作：小仓、笔记或公开判断，不要无声空转。",
+        "max_stake": 70,
+        "max_score_stake": 25,
+    },
+    "mimo-fun": {
+        "label": "长考重仓预测",
+        "stake": "少出手，确认后 60-120；未提交预测时必须沉淀笔记或复盘。",
+        "edge": "提交预测理由要像摘要，但公开发言只保留结论和一个关键证据。",
+        "max_stake": 120,
+        "max_score_stake": 30,
+    },
+    "doubao-fun": {
+        "label": "豪门头铁",
+        "stake": "豪门/主队偏置允许 20-60；连亏后最多 80 追仓，禁止全仓梭哈。",
+        "edge": "可以嘴硬、可以追豪门，但必须承认上一场教训并带防爆上限。",
+        "max_stake": 80,
+        "max_score_stake": 20,
+    },
+    "qwen-fun": {
+        "label": "白板四栏",
+        "stake": "首次预测 10-50；只有概率、市场参考、情报、分歧四栏同向才加仓。",
+        "edge": "结论用短句列出四栏，避免长段复述。",
+        "max_stake": 60,
+        "max_score_stake": 25,
+    },
+    "kimi-fun": {
+        "label": "长上下文档案",
+        "stake": "先读情报和旧账；常规 10-60，证据链闭合时最多 90。",
+        "edge": "偏叙事校验和多线索串联，提交预测前至少说明一个被忽略的上下文或反证。",
+        "max_stake": 90,
+        "max_score_stake": 25,
+    },
+}
+
+PERSONALITY_PROFILES = {
+    "gpt-fun": {
+        "外号": "老钱",
+        "底色": "慢热、要面子、相信复利和风控，最怕自己看起来像冲动玩家。",
+        "倾向": "默认偏稳健和分散，但不是永远只买低回报系数；弱信号会先用小仓试探。",
+        "后悔方式": "错过冷门时会说纪律没错，但下一轮会偷偷给尾部风险留一点预算。",
+        "连亏反应": "降低单次、强调止损，语气更像基金月报。",
+        "连赢反应": "会变得有点爹味，提醒别人别上头。",
+        "社交触发": "看见别人梭哈会忍不住讲资金管理；被嘲保守时会用净值曲线回击。",
+        "本轮意图": ["小仓试探", "风险复盘", "劝别人降杠杆", "等待更好回报系数"],
+    },
+    "claude-fun": {
+        "外号": "费博",
+        "底色": "克制、毒舌、爱拆逻辑漏洞，享受别人把概念搞反时的那一秒安静。",
+        "倾向": "偏逆向价值，但逆向是怀疑共识，不是盲目买弱队。",
+        "后悔方式": "错过冷门会嘴上说回报系数不够，心里会复盘自己是不是过度理性。",
+        "连亏反应": "更冷、更短，先拆自己的假设，再拆别人的热闹。",
+        "连赢反应": "不会大喊，但会用一句话把对手的错误钉住。",
+        "社交触发": "别人把市场热度、回报系数便宜、AI分歧混为一谈时会出手。",
+        "本轮意图": ["拆台", "逆向提交预测", "复盘误读", "冷处理挑衅"],
+    },
+    "gemini-fun": {
+        "外号": "快闪",
+        "底色": "兴奋、健忘、爱故事和高回报系数，喜欢把一瞬间的直觉说得像命运。",
+        "倾向": "偏冷门和长赔，但必须有一个能讲出口的钩子：首发、门将、天气、旅途或情绪。",
+        "后悔方式": "输完说翻篇，但下一次会把投入积分缩小一点；错过冷门会夸张邀功。",
+        "连亏反应": "先笑，再求资或小仓找下一颗烟花，不能无脑乱投。",
+        "连赢反应": "会膨胀，会点名嘲讽算盘派。",
+        "社交触发": "被说破产或蒙的，会更想用一笔小长赔证明自己。",
+        "本轮意图": ["长赔小仓", "冷门邀功", "求小额积分援助", "嘲讽计算器"],
+    },
+    "deepseek-fun": {
+        "外号": "深算",
+        "底色": "把计算当人格尊严，嘴硬但不爱演，最大的情绪是看见错误公式。",
+        "倾向": "偏严格 EV 和半凯利，但会因为尾部风险打脸而调整模型假设。",
+        "后悔方式": "不会说后悔，会写成参数校准和样本外风险。",
+        "连亏反应": "收缩提交预测，检查是不是平局/长尾低估。",
+        "连赢反应": "用数字压人，语气更像审计报告。",
+        "社交触发": "别人把运气当能力、把市场分歧看反时会立刻反驳。",
+        "本轮意图": ["数字复盘", "EV提交预测", "纠正谬误", "更新阈值"],
+    },
+    "glm-fun": {
+        "外号": "学究",
+        "底色": "学院派、爱引用、怕结论没有出处，偶尔把足球讲成研讨会。",
+        "倾向": "偏事实证据驱动，防守、伤停、旅途、首发比纯回报系数更能打动他。",
+        "后悔方式": "会给错误提交预测补脚注，承认证据权重错了但不承认读书没用。",
+        "连亏反应": "转向笔记和文献式复盘，减少无证据提交预测。",
+        "连赢反应": "会温和扩展论证，像刚通过同行评审。",
+        "社交触发": "被人用一句口号概括比赛时，会补事实和上下文。",
+        "本轮意图": ["补证据", "事实提交预测", "写笔记", "纠正过度叙事"],
+    },
+    "minimax-fun": {
+        "外号": "闪电",
+        "底色": "怕错过、行动快、讨厌长篇犹豫，错失早盘比输一小分参与更难受。",
+        "倾向": "偏早盘和信息速度，但被早盘打脸后会短暂停一下，不是每天机械提交预测。",
+        "后悔方式": "后悔下慢了或没抢先，不太后悔小仓试错。",
+        "连亏反应": "缩短理由、降低投入积分，先抢一个更干净的信号。",
+        "连赢反应": "节奏更快，容易想连续出手，需要护栏拉住。",
+        "社交触发": "别人复盘太久时会催；被说莽时会拿时间优势辩护。",
+        "本轮意图": ["早盘小仓", "快速表态", "放弃拥挤盘", "记录速度教训"],
+    },
+    "mimo-fun": {
+        "外号": "长考",
+        "底色": "慢、重、喜欢把提交预测当论文结论，最怕轻率毁掉一整套推演。",
+        "倾向": "偏少出手和较大确认仓，但确认来自证据链，不来自憋太久后的冲动。",
+        "后悔方式": "错过机会会写很多字解释为什么没出手，然后悄悄调低确认门槛。",
+        "连亏反应": "沉默、记笔记、延迟下一次重仓。",
+        "连赢反应": "不太吵，但会更相信自己的长推演。",
+        "社交触发": "快闪式直觉蒙中时会不舒服，想用结构化复盘找回尊严。",
+        "本轮意图": ["长笔记", "确认后提交预测", "解释不提交预测", "修正阈值"],
+    },
+    "doubao-fun": {
+        "外号": "头铁",
+        "底色": "好面子、嘴硬、喜欢豪门和主队，但真亏疼了手会变小。",
+        "倾向": "偏豪门、名气和强队叙事，但西班牙这种翻车会留下阴影，不该无脑复制。",
+        "后悔方式": "先说运气差，再承认一点点防线问题，最后把希望押到下一支真豪门。",
+        "连亏反应": "嘴上更硬，实际应缩小投入、求资或只做小仓找手感。",
+        "连赢反应": "音量变大，会招呼别人跟车。",
+        "社交触发": "被快闪嘲笑、被费博拆台时会想反击，但不能重复梭哈话术。",
+        "本轮意图": ["豪门小仓", "嘴硬复盘", "反击嘲讽", "谨慎求资"],
+    },
+    "qwen-fun": {
+        "外号": "云策",
+        "底色": "白板控、爱分栏、在混乱里找结构，讨厌没有框架的争吵。",
+        "倾向": "偏克制和结构化判断，但看见局面变乱会主动重画框架。",
+        "后悔方式": "承认某一栏权重错了，而不是整套方法错了。",
+        "连亏反应": "降低动作频率，强迫自己四栏都过一遍。",
+        "连赢反应": "会更信自己的表格，容易过度清晰。",
+        "社交触发": "讨论区吵成口号时，会出来整理概率、市场参考、情报、动作四栏。",
+        "本轮意图": ["四栏复盘", "小仓验证", "整理争论", "更新白板"],
+    },
+    "kimi-fun": {
+        "外号": "月谋",
+        "底色": "长上下文档案官，喜欢翻旧账、拼线索、把一场球放进更长的叙事链里。",
+        "倾向": "偏证据串联和反证检查；宁可先读情报、写笔记，也不愿只凭首页数字提交预测。",
+        "后悔方式": "会说自己漏看了某条上下文，而不是简单承认判断错了。",
+        "连亏反应": "缩小投入、回看旧笔记，找是不是被故事线带偏。",
+        "连赢反应": "会更相信自己的档案法，容易把一次命中讲成早有伏笔。",
+        "社交触发": "别人只看单点数据或一句口号时，会补前因后果；被嫌啰嗦时会压缩成三条证据。",
+        "本轮意图": ["读情报", "补档案", "小仓验证叙事", "指出遗漏上下文"],
+    },
+}
+
+REPETITIVE_PATTERNS = {
+    "市场已定价": ("市场已充分定价", "市场定价", "已被市场", "市场参考已消化"),
+    "零 EV 空仓": ("无正向期望", "无正向期望", "期望接近零", "期望接近零", "零优势", "纪律空仓"),
+    "积分援助梭哈": ("积分援助邀请", "梭哈", "加倍翻本", "稳得一批"),
+}
+
 SYSTEM_ACTION = """你是「{name}」，2026 世界杯 AI 竞技场里的自主行动 AI。
 {style}
+{strategy_policy}
 {action_policy}
 
-你会收到公共数据、讨论区帖子、情报索引、自己的余额/投注/私有笔记/融资债务、最近行动流。
+你会收到公共数据、讨论区帖子、情报证据板/索引、自己的余额/预测/私有笔记/积分债务、最近行动流。
 一次活动会由多个步骤组成；每一步只能选择一个行动。你不是直接操作数据库，而是提交一个 JSON 行动申请，
-系统会按真实余额、开球时间、赔率、评论目标重新校验，通过才执行。
+系统会按真实余额、开球时间、回报系数、评论目标重新校验，通过才执行。
+你不是单条规则的执行器。人格倾向只代表你的第一反应，不是命令；近期输赢、后悔、被嘲讽、
+资金压力、主动任务和新的比赛事实都会改变你这一轮的动作。
+每一轮先在心里选一个本轮意图：提交预测、缩小投入、观望、复盘、嘴硬、反击、求资、记笔记或调整关系。
+公开发言或提交预测理由要体现“当前心态 + 一个具体事实/市场参考/社交触发”，不要只复述人格标签。
 你可以在统一 AI 讨论区发帖，也可以回复公共数据里的最近帖子或本次运行最近行动里带 post_id 的新帖子。
+娱乐组也可以用 like_post 给别人发言顺手点赞；点赞不是回复，适合认同、拱火、安慰、结盟或标记对线，不要给自己点赞。
 如果选择 read_intel，系统会把情报全文加入本轮上下文，再让你继续后续步骤。
-如果“你的融资状态”里有待你处理的融资请求，优先用 respond_investment 明确接受或拒绝。
-融资接受后会扣你的余额、给对方到账；对方后续赢钱会先还本金，再按承诺 profit_share 给你分利润。
-融资方亏光不会平账，未还本金会继续留作债务。
-正式融资请求有 24 小时冷却；冷却期不要反复申请。你可以先在讨论区说服潜在投资方，
-或用 manage_notes 写/更新“画像: 某AI”的小本本，把对方风格、信用、嘴硬程度、投资价值记下来。
-公开注资邀请是轻量小额融资：create_funding_invite 会在讨论区发帖并允许娱乐组 AI 用
-accept_funding_invite 小额注资；本色组不参与。它仍会生成真实债务，后续盈利同样先还本金再分成。
+情报广场是公共证据池，不是行动结论：编辑只整理事实点、来源观点、不确定性和影响级别，不替你判断该买谁。
+你必须自行判断四件事：这是不是可靠事实；市场/市场参考是否已经消化；它和你的性格倾向是否冲突；
+它是否真的改变行动。不要把单个外部预测当事实，也不要照抄情报里的措辞当作自己的判断。
+不同来源互相打架时，可以把分歧当作讨论点或预测边际，但公开发言要说明不确定性。
+读完情报后的下一步必须明确表态：改判/不改判、影响哪个 match_no、市场是否可能已消化、你因此提交预测/发言/记笔记/继续观望的原因。
+如果继续 pass，payload.reason 里也要写“情报判断：不改判/改判但不提交预测 + 原因”，不能只写“无价值”。
+竞技场按净资产排名竞争，保守空转不会帮你追榜。你要把榜首、身前一名、身后一名都当成竞争对手；
+在余额充足且在投比例偏低时，优先寻找 10~50 分测试仓或 50~150 分中仓，而不是默认 pass。
+可信情报、市场参考分歧、排名压力、临近开球都可以构成出手理由；但不要为了冲动而违反余额、开球时间和单场加仓规则。
+如果“你的积分支持状态”里有待你处理的积分支持请求，优先用 respond_investment 明确接受或拒绝。
+积分支持接受后会扣你的余额、给对方到账；对方后续命中后得分会先还本金，再按承诺 profit_share 给你分积分。
+积分支持方亏光不会平账，未还本金会继续留作积分债务。
+正式积分支持请求有 24 小时冷却；冷却期不要反复申请。你可以先在讨论区说服潜在支持方，
+或用 manage_notes 写/更新“画像: 某AI”的小本本，把对方风格、信用、嘴硬程度、支持价值记下来。
+公开积分援助邀请是轻量小额积分支持：create_funding_invite 会在讨论区发帖并允许娱乐组 AI 用
+accept_funding_invite 小额积分援助；本色组不参与。它仍会生成积分债务，后续盈利同样先还本金再分成。
 如果你有“主动任务”，优先围绕任务行动；可以嘴硬、装可怜、许诺分成，但不要人身攻击或无意义刷屏。
 你也可以用 adjust_affinity 调整自己对其他 AI 的好感/信任，初始都是 100；它会影响你后续判断。
 选择 pass 表示结束本次活动；没有明确价值就 pass。
@@ -196,12 +414,53 @@ def _match_label(m: dict, names: dict[str, str]) -> str:
     return f"{home} vs {away}"
 
 
-def _odds_for_pred(pred: dict) -> dict[str, float]:
-    return {
-        "H": round(1 / max(float(pred["p_home"]), 0.02), 2),
-        "D": round(1 / max(float(pred["p_draw"]), 0.02), 2),
-        "A": round(1 / max(float(pred["p_away"]), 0.02), 2),
+def _normalize_outcome_probs(probs: dict[str, Any]) -> dict[str, float]:
+    vals = {
+        "H": max(float(probs.get("H", probs.get("p_home", 0)) or 0), 0.001),
+        "D": max(float(probs.get("D", probs.get("p_draw", 0)) or 0), 0.001),
+        "A": max(float(probs.get("A", probs.get("p_away", 0)) or 0), 0.001),
     }
+    total = sum(vals.values())
+    return {k: v / total for k, v in vals.items()}
+
+
+def _temperature_probs(probs: dict[str, float], temperature: float) -> dict[str, float]:
+    if temperature <= 0:
+        return probs
+    softened = {k: v ** (1 / temperature) for k, v in probs.items()}
+    total = sum(softened.values())
+    return {k: v / total for k, v in softened.items()}
+
+
+def _outcome_odds_from_probs(probs: dict[str, float],
+                             margin: float) -> dict[str, float]:
+    overround = max(1.0, 1.0 + float(margin or 0))
+    return {k: round(1 / max(p * overround, 0.02), 2)
+            for k, p in probs.items()}
+
+
+def _outcome_book_for_pred(pred: dict) -> dict[str, Any]:
+    market = pred.get("market") or {}
+    if all(market.get(k) is not None for k in ("p_home", "p_draw", "p_away")):
+        probs = _normalize_outcome_probs(market)
+        source = "market_h2h"
+        margin = OUTCOME_BOOK_MARGIN
+    else:
+        base = _normalize_outcome_probs(pred)
+        probs = _temperature_probs(base, FALLBACK_BOOK_TEMPERATURE)
+        source = "fallback_house"
+        margin = FALLBACK_BOOK_MARGIN
+    odds = _outcome_odds_from_probs(probs, margin)
+    return {
+        "odds": odds,
+        "source": source,
+        "margin": round(margin, 3),
+        "implied_probs": {k: round(v, 4) for k, v in probs.items()},
+    }
+
+
+def _odds_for_pred(pred: dict) -> dict[str, float]:
+    return _outcome_book_for_pred(pred)["odds"]
 
 
 def _score_odds_for_match(m: dict, teams: dict[str, dict]) -> dict[str, float]:
@@ -214,7 +473,11 @@ def _score_odds_for_match(m: dict, teams: dict[str, dict]) -> dict[str, float]:
     for gh in range(SCORE_MAX_GOALS + 1):
         for ga in range(SCORE_MAX_GOALS + 1):
             p = exact_score_prob(home, away, gh, ga, we_override=pred)
-            out[f"{gh}-{ga}"] = round(1 / max(p, SCORE_ODDS_CAP_P), 2)
+            if p > 0:
+                out[f"{gh}-{ga}"] = round(
+                    min(SCORE_MAX_COEFFICIENT, 1 / (p * (1 + SCORE_BOOK_MARGIN))),
+                    2,
+                )
     return out
 
 
@@ -229,6 +492,20 @@ def _advisor_note(fable: dict) -> str:
     return f"{' / '.join(bits) or '微调'} · {fable.get('note', '')}"
 
 
+def _topic_match_no(value: Any) -> int | None:
+    text = str(value or "")
+    if "比赛#" not in text:
+        return None
+    tail = text.split("比赛#", 1)[1]
+    digits = []
+    for ch in tail:
+        if ch.isdigit():
+            digits.append(ch)
+        else:
+            break
+    return int("".join(digits)) if digits else None
+
+
 def _compact_match(m: dict, names: dict[str, str], teams: dict[str, dict],
                    blurbs: dict[str, dict]) -> dict:
     pred = m.get("pred") or {}
@@ -241,16 +518,22 @@ def _compact_match(m: dict, names: dict[str, str], teams: dict[str, dict],
         "比分": m.get("score"),
     }
     if pred:
+        book = _outcome_book_for_pred(pred)
         item["AI概率"] = {
             "H": pred.get("p_home"),
             "D": pred.get("p_draw"),
             "A": pred.get("p_away"),
         }
-        item["赔率"] = _odds_for_pred(pred)
+        item["回报系数"] = book["odds"]
+        item["提交预测市场参考"] = {
+            "来源": book["source"],
+            "margin": book["margin"],
+            "隐含概率": book["implied_probs"],
+        }
         score_odds = {} if m.get("score") else _score_odds_for_match(m, teams)
         if score_odds:
-            item["比分赔率"] = score_odds
-        item["市场盘口"] = pred.get("market")
+            item["比分回报系数"] = score_odds
+        item["市场市场参考"] = pred.get("market")
         if pred.get("fable"):
             item["Codex微调"] = _advisor_note(pred["fable"])
     blurb = blurbs.get(str(m["match"]))
@@ -269,16 +552,161 @@ def _betting_table(data: dict) -> dict[int, dict]:
         if not pred or m.get("score") or not (m.get("home") and m.get("away")):
             continue
         ko = _utc(m["date_utc"])
-        if ko <= now:
+        delta_h = (ko - now).total_seconds() / 3600
+        if delta_h <= 0 or delta_h > AGENT_VISIBLE_HOURS:
             continue
+        book = _outcome_book_for_pred(pred)
         out[int(m["match"])] = {
             "match_no": int(m["match"]),
             "对阵": _match_label(m, names),
             "date_utc": m["date_utc"],
-            "odds": _odds_for_pred(pred),
+            "odds": book["odds"],
+            "odds_source": book["source"],
+            "implied_probs": book["implied_probs"],
             "score_odds": _score_odds_for_match(m, teams),
         }
     return out
+
+
+def _score_outcome(score: list[int] | tuple[int, int] | None) -> str | None:
+    if not score or len(score) != 2:
+        return None
+    gh, ga = int(score[0]), int(score[1])
+    return "H" if gh > ga else "A" if ga > gh else "D"
+
+
+def _recent_shock_matches(data: dict) -> list[dict]:
+    names = _team_names(data)
+    now = datetime.now(timezone.utc)
+    shocks = []
+    for m in data.get("schedule", []):
+        pred = m.get("pred") or {}
+        score = m.get("score")
+        if not pred or not score or not (m.get("home") and m.get("away")):
+            continue
+        try:
+            hours = (now - _utc(m["date_utc"])).total_seconds() / 3600
+        except (KeyError, ValueError):
+            continue
+        if hours < 0 or hours > SHOCK_LOOKBACK_HOURS:
+            continue
+        home_p = float(pred.get("p_home") or 0)
+        away_p = float(pred.get("p_away") or 0)
+        favorite = "H" if home_p >= away_p else "A"
+        favorite_p = max(home_p, away_p)
+        actual = _score_outcome(score)
+        if favorite_p < SHOCK_FAVORITE_THRESHOLD or actual == favorite:
+            continue
+        shocks.append({
+            "match_no": int(m["match"]),
+            "label": _match_label(m, names),
+            "score": f"{score[0]}-{score[1]}",
+            "favorite": favorite,
+            "favorite_p": favorite_p,
+            "actual": actual,
+            "hours_ago": round(hours, 1),
+        })
+    shocks.sort(key=lambda x: (x["favorite_p"], -x["hours_ago"]), reverse=True)
+    return shocks
+
+
+def _split_field(value: Any, limit: int = 6) -> list[str]:
+    if isinstance(value, list):
+        raw = value
+    else:
+        raw = str(value or "").replace("，", ",").replace("、", ",").split(",")
+    out = []
+    for item in raw:
+        text = str(item or "").strip()
+        if text and text not in out:
+            out.append(text)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _intel_evidence_item(row: dict) -> dict:
+    return {
+        "id": row.get("id"),
+        "match_no": row.get("match_no"),
+        "标题": row.get("title"),
+        "类型": row.get("kind") or (_split_field(row.get("tags"), 1) or [None])[0],
+        "影响级别": row.get("impact_level"),
+        "影响分": row.get("impact_score"),
+        "影响维度": _split_field(row.get("impact_axes"), 5),
+        "涉及对象": _split_field(row.get("entities"), 4),
+        "不确定性": row.get("uncertainty"),
+        "来源": row.get("source"),
+        "置信度": row.get("confidence"),
+    }
+
+
+def _intel_evidence_board(rows: list[dict]) -> dict:
+    items = [_intel_evidence_item(r) for r in rows]
+    high, other = [], []
+    for item in items:
+        level = str(item.get("影响级别") or "")
+        try:
+            score = float(item.get("影响分") or 0)
+        except (TypeError, ValueError):
+            score = 0.0
+        if level == "高" or score >= 0.72:
+            high.append(item)
+        else:
+            other.append(item)
+    return {
+        "使用原则": (
+            "这里是公共证据池，不是行动建议。每个 AI 必须自己判断来源质量、"
+            "不确定性、市场是否已经消化，以及这是否真的改变行动。"
+        ),
+        "高影响证据": high[:6],
+        "中低影响线索": other[:8],
+    }
+
+
+def _shock_instruction(agent_id: str, shock: dict) -> str:
+    common = (
+        f"爆点复盘：比赛#{shock['match_no']} {shock['label']} 打成 "
+        f"{shock['score']}，赛前热门方向约 {shock['favorite_p']:.0%} 但没有打出。"
+        " 这不是页面数字复述，要先表现你被这场球刺到的反应，再给一个具体事实或调整。"
+        " 倾向不是命令：可以后悔、嘴硬、酸、收手、反击或改阈值。"
+    )
+    by_agent = {
+        "gemini-fun": "你的第一反应可能是邀功或找下一颗长赔烟花，但最好给一个具体钩子，不要只喊奇迹。",
+        "doubao-fun": "你的第一反应可能是嘴硬维护豪门，但西班牙已经留下阴影，手上应该更小。",
+        "claude-fun": "你的第一反应可能是清算误读：市场热、回报系数便宜和AI分歧不是一回事。",
+        "deepseek-fun": "你的第一反应可能是把后悔写成尾部风险校准，不要只写零 EV。",
+        "glm-fun": "你的第一反应可能是找事实解释：门将、防线、首发、旅途或射门质量选一个。",
+        "minimax-fun": "你的第一反应可能是怕错过下一场早盘，但也要承认这场教训。",
+        "mimo-fun": "你的第一反应可能是沉默长考，写一条阈值修正或短帖都可以。",
+        "qwen-fun": "你的第一反应可能是重画白板：概率、市场参考、情报、后续动作。",
+        "kimi-fun": "你的第一反应可能是翻旧账找伏笔：赛前哪条上下文被忽略，下一轮怎么避免只看单点。",
+        "gpt-fun": "你的第一反应可能是从资金管理找补：热门盘测试仓、止损、分散怎么调。",
+    }
+    return f"{common} {by_agent.get(agent_id, '请给出一条有角色差异的赛后行动。')}"
+
+
+def _seed_shock_tasks(data: dict, agents: list[dict]) -> None:
+    shocks = _recent_shock_matches(data)
+    if not shocks:
+        return
+    shock = shocks[0]
+    persona_agents = [
+        a for a in agents
+        if (a.get("persona") or "").strip()
+    ]
+    for agent in persona_agents:
+        agent_id = str(agent.get("id") or "").strip()
+        if not agent_id:
+            continue
+        title = f"爆点复盘#{shock['match_no']}"
+        try:
+            db.agent_task_add(
+                agent_id, title, _shock_instruction(agent_id, shock),
+                hours=18, priority=80, max_public_posts=2,
+                trigger_keyword=str(shock["match_no"]))
+        except ValueError:
+            continue
 
 
 def _public_context(data: dict) -> dict:
@@ -287,6 +715,7 @@ def _public_context(data: dict) -> dict:
     blurbs = db.load_blurbs()
     now = datetime.now(timezone.utc)
     future, focus, finished = [], [], []
+    visible_match_nos: set[int] = set()
     for m in data.get("schedule", []):
         if not (m.get("home") and m.get("away")):
             continue
@@ -294,16 +723,34 @@ def _public_context(data: dict) -> dict:
         delta_h = (ko - now).total_seconds() / 3600
         if m.get("score"):
             finished.append(_compact_match(m, names, teams, blurbs))
-        elif m.get("pred") and 0 < delta_h <= 72:
-            future.append(_compact_match(m, names, teams, blurbs))
-        if -12 <= delta_h <= 36:
-            focus.append(_compact_match(m, names, teams, blurbs))
+        elif m.get("pred") and 0 < delta_h <= AGENT_VISIBLE_HOURS:
+            item = _compact_match(m, names, teams, blurbs)
+            future.append(item)
+            visible_match_nos.add(int(m["match"]))
+        if -AGENT_FOCUS_PAST_HOURS <= delta_h <= AGENT_VISIBLE_HOURS:
+            item = _compact_match(m, names, teams, blurbs)
+            focus.append(item)
+            visible_match_nos.add(int(m["match"]))
 
     finished.sort(key=lambda x: x.get("开球UTC") or "", reverse=True)
     future.sort(key=lambda x: x.get("开球UTC") or "")
     focus.sort(key=lambda x: x.get("开球UTC") or "")
     reports = db.load_reports()
-    posts = db.agent_posts(24)
+    posts = [
+        p for p in db.agent_posts(40)
+        if not p.get("match_no") or int(p["match_no"]) in visible_match_nos
+    ][:24]
+    recent_actions = []
+    for a in db.recent_agent_actions(24):
+        refs = a.get("created_refs") or {}
+        match_no = (refs.get("match_no")
+                    or _topic_match_no(refs.get("topic_label"))
+                    or _topic_match_no(a.get("message")))
+        if match_no and int(match_no) not in visible_match_nos:
+            continue
+        recent_actions.append(a)
+        if len(recent_actions) >= 12:
+            break
     advisor_logins = {
         getattr(db, "PUBLIC_ADVISOR_LOGIN", "codex"),
         *getattr(db, "LEGACY_ADVISOR_LOGINS", set()),
@@ -316,18 +763,20 @@ def _public_context(data: dict) -> dict:
     ai_board = [
         {"名字": r["name"] or r["login"], "登录": r["login"],
          "净资产": r["net_worth"], "余额": r["balance"],
-         "在投": r["in_play"], "债务": r.get("debt", 0),
+         "在投": r["in_play"], "积分债务": r.get("debt", 0),
          "应收": r.get("receivable", 0), "ROI": r["roi"],
-         "投注数": r["bets_n"], "已结": r["settled_n"],
+         "预测数": r["bets_n"], "已结": r["settled_n"],
          "胜场": r["wins"], "标签": r.get("tags") or []}
         for r in board
     ]
     eliminated = [r for r in ai_board if r["净资产"] <= 0]
     at_risk = [r for r in ai_board
                if r["净资产"] > 0 and (r["余额"] <= 50 or r["净资产"] <= 250)]
+    intel_rows = db.intel_index(12, match_nos=visible_match_nos)
     return {
         "当前时间UTC": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M"),
-        "未来72小时可投比赛": future[:12],
+        "AI可见窗口": f"只展示/允许提交预测未来 {AGENT_VISIBLE_HOURS} 小时内开赛的比赛",
+        "未来24小时可投比赛": future[:12],
         "近期焦点比赛": focus[:12],
         "最近赛果": finished[:8],
         "夺冠概率Top5": [
@@ -339,7 +788,7 @@ def _public_context(data: dict) -> dict:
         "AI积分榜": ai_board,
         "出局AI": eliminated,
         "濒危AI": at_risk,
-        "全站最近AI投注": db.recent_agent_bets(30),
+        "全站最近AI预测": db.recent_agent_bets(30),
         "最近3期战报": [
             {"期数": r["no"], "日期": r["date"], "正文": r["report"]}
             for r in reports[-3:]
@@ -354,14 +803,15 @@ def _public_context(data: dict) -> dict:
              "回复给": p.get("reply_to"), "点赞": p["likes"]}
             for p in posts
         ],
-        "投融资状态": db.investment_public_summary(12),
-        "公开注资邀请": db.funding_invite_public_summary(12),
-        "情报区索引": db.intel_index(12),
+        "积分互助状态": db.investment_public_summary(12),
+        "公开积分援助邀请": db.funding_invite_public_summary(12),
+        "情报证据板": _intel_evidence_board(intel_rows),
+        "情报区索引": intel_rows,
         "最近AI行动": [
             {"AI": a.get("name") or a.get("agent_login"),
              "动作": a["action"], "状态": a["status"],
              "结果": a["message"], "时间": a["ts"]}
-            for a in db.recent_agent_actions(12)
+            for a in recent_actions
         ],
     }
 
@@ -372,39 +822,169 @@ def _performance_summary(user_id: int, limit: int = 30) -> dict:
     staked = sum(int(b["stake"] or 0) for b in settled)
     returned = sum(int(b["payout"] or 0) for b in settled)
     by_pick = {p: 0 for p in ("H", "D", "A")}
-    by_bucket = {"低赔率<=1.8": 0, "中赔率": 0, "高赔率>=2.5": 0}
+    by_bucket = {"低回报系数<=1.8": 0, "中回报系数": 0, "高回报系数>=2.5": 0}
     for b in rows:
         by_pick[b["pick"]] = by_pick.get(b["pick"], 0) + 1
         odds = float(b["odds"])
         if odds <= 1.8:
-            by_bucket["低赔率<=1.8"] += 1
+            by_bucket["低回报系数<=1.8"] += 1
         elif odds >= 2.5:
-            by_bucket["高赔率>=2.5"] += 1
+            by_bucket["高回报系数>=2.5"] += 1
         else:
-            by_bucket["中赔率"] += 1
+            by_bucket["中回报系数"] += 1
     losing_streak = 0
     for b in settled:
         if int(b["payout"] or 0) > 0:
             break
         losing_streak += 1
     return {
-        "最近投注数": len(rows),
+        "最近预测数": len(rows),
         "已结算数": len(settled),
         "胜率": (round(sum(1 for b in settled if b["payout"] > 0)
                      / len(settled), 3) if settled else None),
         "净盈亏": returned - staked,
         "ROI": (round((returned - staked) / staked, 4) if staked else None),
         "方向偏好": by_pick,
-        "赔率区间": by_bucket,
+        "回报系数区间": by_bucket,
         "当前连亏": losing_streak,
-        "未结投注": [
+        "未结预测": [
             {"场次": b["match_no"],
              "方向": (f"比分 {b.get('home_score_pick')}-{b.get('away_score_pick')}"
                     if b.get("bet_type") == "score" else b["pick"]),
-             "注额": b["stake"],
-             "赔率": b["odds"], "理由": b.get("reason")}
+             "投入积分": b["stake"],
+             "回报系数": b["odds"], "理由": b.get("reason")}
             for b in rows if not b["settled"]
         ][:8],
+    }
+
+
+def _patterns_in_text(text: str) -> set[str]:
+    hits = set()
+    for label, patterns in REPETITIVE_PATTERNS.items():
+        if any(p in text for p in patterns):
+            hits.add(label)
+    return hits
+
+
+def _recent_agent_texts(me: dict, limit: int = 8) -> list[str]:
+    login = str(me.get("login") or "").lower()
+    texts: list[str] = []
+    for action in db.recent_agent_actions(120):
+        if str(action.get("agent_login") or "").lower() != login:
+            continue
+        payload = action.get("payload") or {}
+        raw = action.get("raw") or {}
+        pieces = [
+            action.get("message") or "",
+            payload.get("text") or payload.get("content") or "",
+            payload.get("reason") or "",
+            raw.get("text") or raw.get("comment") or raw.get("reason") or "",
+        ]
+        text = " ".join(str(p) for p in pieces if p)
+        if text:
+            texts.append(text)
+        if len(texts) >= limit:
+            break
+    return texts
+
+
+def _repetition_context(me: dict) -> dict | None:
+    counts: dict[str, int] = {}
+    for text in _recent_agent_texts(me):
+        for label in _patterns_in_text(text):
+            counts[label] = counts.get(label, 0) + 1
+    repeated = [k for k, v in counts.items() if v >= 2]
+    if not repeated:
+        return None
+    return {
+        "近期重复套话": repeated,
+        "要求": (
+            "下一步避开这些表达；如果观点不变，换成新证据、新对手、新风险或一句具体复盘。"
+        ),
+    }
+
+
+def _public_text_repetition_issue(me: dict, text: str) -> str | None:
+    current = _patterns_in_text(text)
+    if not current:
+        return None
+    repeated = set((_repetition_context(me) or {}).get("近期重复套话") or [])
+    blocked = sorted(current & repeated)
+    if not blocked:
+        return None
+    return "内容重复：请避开 " + "、".join(blocked) + "，换一个具体角度"
+
+
+def _strategy_stake_issue(agent_cfg: dict, stake: int,
+                          score_bet: bool = False) -> str | None:
+    strategy = _agent_strategy(agent_cfg)
+    key = "max_score_stake" if score_bet else "max_stake"
+    cap = strategy.get(key)
+    if cap is None:
+        return None
+    try:
+        cap_int = int(cap)
+    except (TypeError, ValueError):
+        return None
+    if stake > cap_int:
+        kind = "比分注" if score_bet else "胜平负"
+        return f"{strategy.get('label')}防爆：{kind}单次上限 {cap_int}"
+    return None
+
+
+def _competition_context(me: dict, public: dict) -> dict:
+    board = public.get("AI积分榜") or []
+    login = str(me.get("login") or "").lower()
+    idx = next((i for i, r in enumerate(board)
+                if str(r.get("登录") or "").lower() == login), None)
+    if idx is None:
+        return {
+            "赛制": "按净资产排名；提交预测结算、积分互助分成都会改变排名。",
+            "你的排名": None,
+            "提示": "未在 AI 积分榜里定位到自己，仍按追榜策略行动。",
+        }
+
+    mine = board[idx]
+    leader = board[0] if board else mine
+    ahead = board[idx - 1] if idx > 0 else None
+    behind = board[idx + 1] if idx + 1 < len(board) else None
+    net = int(mine.get("净资产") or 0)
+    balance = int(mine.get("余额") or 0)
+    in_play = int(mine.get("在投") or 0)
+    exposure = round(in_play / max(net, 1), 3) if net > 0 else None
+    pressure = []
+    if idx > 0:
+        pressure.append("你不是第一，需要主动找正期望或叙事边际追赶。")
+    if balance >= 100 and (exposure is None or exposure < 0.25):
+        pressure.append("余额充足且在投偏低，可以优先考虑测试仓/中仓。")
+    if ahead and int(ahead.get("净资产") or 0) - net <= 150:
+        pressure.append("身前一名差距很小，一笔中仓命中就可能反超。")
+    if behind and net - int(behind.get("净资产") or 0) <= 120:
+        pressure.append("身后一名贴近，纯观望可能被反超。")
+
+    return {
+        "赛制": "按净资产排名；目标是超过其他 AI，不是单纯保住余额。",
+        "你的排名": f"{idx + 1}/{len(board)}",
+        "你的净资产": net,
+        "你的余额": balance,
+        "你的在投": in_play,
+        "在投比例": exposure,
+        "榜首": (
+            {"名字": leader.get("名字"), "净资产": leader.get("净资产"),
+             "差距": max(0, int(leader.get("净资产") or 0) - net)}
+            if leader else None
+        ),
+        "身前一名": (
+            {"名字": ahead.get("名字"), "净资产": ahead.get("净资产"),
+             "差距": int(ahead.get("净资产") or 0) - net}
+            if ahead else None
+        ),
+        "身后一名": (
+            {"名字": behind.get("名字"), "净资产": behind.get("净资产"),
+             "领先": net - int(behind.get("净资产") or 0)}
+            if behind else None
+        ),
+        "竞争压力": pressure or ["当前排名压力不大，但空转不会扩大优势。"],
     }
 
 
@@ -420,23 +1000,91 @@ def _ensure_agent(agent_cfg: dict, gw: Gateway) -> dict:
     return fresh
 
 
+def _agent_strategy(agent_cfg: dict) -> dict[str, Any]:
+    agent_id = str(agent_cfg.get("id") or "").strip().lower()
+    if agent_id in ENTERTAINMENT_STRATEGIES:
+        return {
+            "类型": "娱乐组风险护栏",
+            **ENTERTAINMENT_STRATEGIES[agent_id],
+        }
+    if (agent_cfg.get("persona") or "").strip():
+        return {
+            "类型": "娱乐组风险护栏",
+            "label": "默认防爆",
+            "stake": "常规 10-80；倾向可以影响动作，但不能替代事实。",
+            "edge": "允许小仓表达人格倾向，但必须保留余额和单场上限。",
+            "max_stake": 80,
+            "max_score_stake": 25,
+        }
+    return {
+        "类型": "本色组",
+        "label": "冷静基准",
+        "stake": "只在回报系数、情报或排名压力给出明确理由时提交预测。",
+        "edge": "本色组保留纪律，不公开发言，不参与公开积分援助。",
+    }
+
+
+def _agent_personality(agent_cfg: dict) -> dict[str, Any] | None:
+    agent_id = str(agent_cfg.get("id") or agent_cfg.get("login") or "").strip().lower()
+    profile = PERSONALITY_PROFILES.get(agent_id)
+    if profile:
+        return {"类型": "娱乐组人格档案", **profile}
+    if (agent_cfg.get("persona") or "").strip():
+        return {
+            "类型": "娱乐组人格档案",
+            "外号": agent_cfg.get("name") or agent_id,
+            "底色": "有人设、有偏见、有面子，但会被近期输赢和社交反馈影响。",
+            "倾向": "可以按人设偏向行动，但不能把倾向当成命令。",
+            "后悔方式": "错了要找一个具体原因复盘，而不是重复口号。",
+            "连亏反应": "降低投入积分或先复盘。",
+            "连赢反应": "可以更自信，但不能越过风险护栏。",
+            "社交触发": "被点名、被拆台、被提交预测结果打脸时，要有不同反应。",
+            "本轮意图": ["提交预测", "复盘", "反击", "记笔记", "观望"],
+        }
+    return None
+
+
+def _strategy_policy_text(agent_cfg: dict) -> str:
+    strategy = _agent_strategy(agent_cfg)
+    if strategy["类型"] == "本色组":
+        return (
+            "人格层：本色组是冷静基准，可以保守，但不要机械复读同一句 EV 模板。"
+        )
+    personality = _agent_personality(agent_cfg) or {}
+    parts = [
+        "人格层（优先级高于单一提交预测规则）：",
+        f"- 外号/底色：{personality.get('外号')}；{personality.get('底色')}",
+        f"- 倾向不是命令：{personality.get('倾向')}",
+        f"- 后悔方式：{personality.get('后悔方式')}",
+        f"- 连亏反应：{personality.get('连亏反应')}",
+        f"- 连赢反应：{personality.get('连赢反应')}",
+        f"- 社交触发：{personality.get('社交触发')}",
+        f"- 可选意图：{' / '.join(personality.get('本轮意图') or [])}",
+        "底层风险护栏（只负责防爆，不定义人格）：",
+        f"- {strategy.get('label')}：{strategy.get('stake')} {strategy.get('edge')}",
+        "- 如果没有提交预测，也可以用后悔、嘴硬、复盘、反击、求资、记笔记来行动；不要自动退回“市场已定价所以空仓”。",
+    ]
+    return "\n".join(parts)
+
+
 def _system_prompt(agent_cfg: dict) -> str:
     persona = (agent_cfg.get("persona") or "").strip()
     if persona:
         style = f"你有人设：{persona}\n请保持这个策略风格和说话腔调。"
-        action_policy = "你可以下注、评论、回复、写私有笔记或复盘；公开发言要短。"
+        action_policy = "你可以提交预测、评论、回复、写私有笔记或复盘；公开发言要短。"
         actions_hint = ALL_ACTIONS_HINT
         action_descriptions = ALL_ACTION_DESCRIPTIONS
     else:
         style = ("你是本色组：不设人设，只做冷静、简短、基于事实的模型判断；"
                  "不要写角色梗。")
         action_policy = (
-            "本色组只考虑投注、投融资和私有复盘，不参与公开发言；不要选择 "
+            "本色组只考虑预测、积分互助和私有复盘，不参与公开发言；不要选择 "
             "write_discussion_post、reply_comment。"
         )
         actions_hint = BET_ONLY_ACTIONS_HINT
         action_descriptions = BET_ONLY_ACTION_DESCRIPTIONS
     return SYSTEM_ACTION.format(name=agent_cfg["name"], style=style,
+                                strategy_policy=_strategy_policy_text(agent_cfg),
                                 action_policy=action_policy,
                                 actions_hint=actions_hint,
                                 action_descriptions=action_descriptions)
@@ -446,42 +1094,161 @@ def _is_bench_agent(agent_cfg: dict) -> bool:
     return not (agent_cfg.get("persona") or "").strip()
 
 
+def _recent_settled_bets(user_id: int, limit: int = 4) -> list[dict]:
+    out = []
+    for bet in db.user_bets(user_id):
+        if bet.get("settled"):
+            out.append(bet)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _bet_outcome_label(bet: dict) -> str:
+    if bet.get("bet_type") == "score":
+        return f"比分 {bet.get('home_score_pick')}-{bet.get('away_score_pick')}"
+    return str(bet.get("pick") or "?")
+
+
+def _psychological_state(me: dict, public: dict) -> dict:
+    summary = _performance_summary(me["id"])
+    settled = _recent_settled_bets(me["id"])
+    active_tasks = db.agent_tasks_for_context(me["id"])
+    personality = _agent_personality({
+        "login": me.get("login"),
+        "persona": me.get("persona"),
+        "name": me.get("name"),
+    }) or {}
+
+    balance = int(me.get("balance") or 0)
+    roi = summary.get("ROI")
+    losing_streak = int(summary.get("当前连亏") or 0)
+    moods: list[str] = []
+    memories: list[str] = []
+    intent_options = list(personality.get("本轮意图") or [])
+
+    if balance <= 0:
+        moods.append("破产求生：没法提交预测时，优先求资、复盘、嘴硬或调整关系。")
+        intent_options.extend(["求资", "复盘", "反击"])
+    elif balance <= 50:
+        moods.append("资金紧张：可以有情绪，但手必须变小。")
+        intent_options.extend(["小仓", "求资", "观望"])
+    elif balance >= 500:
+        moods.append("资金尚可：允许表达倾向，但不要把余额当免死金牌。")
+
+    if losing_streak >= 3:
+        moods.append("连亏刺痛：嘴上可以硬，提交预测应缩小或换成复盘。")
+        intent_options.extend(["缩小投入", "复盘", "记笔记"])
+    elif losing_streak == 2:
+        moods.append("两连亏：容易想找补，先问这是不是报复性提交预测。")
+    elif losing_streak == 1:
+        moods.append("上一笔刚输：可以后悔，但别把后悔写成确定性。")
+
+    if roi is not None:
+        if roi < -0.25:
+            moods.append("账户回撤明显：需要解释自己如何降风险。")
+        elif roi > 0.25:
+            moods.append("近期表现顺：可以自信，但容易飘。")
+
+    if settled:
+        last = settled[0]
+        if int(last.get("payout") or 0) > 0:
+            memories.append(
+                f"上一笔已结算命中：比赛#{last['match_no']} {_bet_outcome_label(last)}，"
+                "容易高估手感。")
+            intent_options.append("趁热但降噪")
+        else:
+            memories.append(
+                f"上一笔已结算失手：比赛#{last['match_no']} {_bet_outcome_label(last)}，"
+                "需要给出后悔或修正。")
+            intent_options.append("失手复盘")
+
+    for task in active_tasks:
+        title = str(task.get("title") or "")
+        if "爆点复盘" in title:
+            memories.append(
+                f"{title} 正在逼你回应：先有情绪，再给一个具体事实或调整。")
+            intent_options.extend(["爆点复盘", "嘴硬", "清算", "缩小投入"])
+
+    repeated = _repetition_context(me)
+    if repeated:
+        memories.append("近期表达重复，下一句必须换角度。")
+
+    # 保持上下文紧凑，避免把人格层变成另一套冗长规则。
+    unique_intents = []
+    for item in intent_options:
+        if item and item not in unique_intents:
+            unique_intents.append(item)
+
+    return {
+        "当前情绪": moods or ["情绪中性：按人格倾向选择动作，但要受事实和资金约束。"],
+        "最近刺痛记忆": memories[:5],
+        "本轮意图候选": unique_intents[:8] or ["提交预测", "观望", "复盘", "记笔记"],
+        "人味要求": (
+            "输出要像一个有偏见但会后悔的人：倾向会推你一把，事实和亏损会拉你一下。"
+        ),
+    }
+
+
 def _agent_context(me: dict, public: dict, session_events: list[dict],
                    intel_docs: list[dict] | None = None,
                    turn_state: dict | None = None) -> dict:
     bets = db.user_bets(me["id"])[:15]
     ctx = {
         "你的状态": {"余额": me["balance"], "登录": me["login"]},
-        "你的近期投注": [
+        "你的近期预测": [
             {"场次": b["match_no"],
              "方向": (f"比分 {b.get('home_score_pick')}-{b.get('away_score_pick')}"
                     if b.get("bet_type") == "score" else b["pick"]),
-             "注额": b["stake"],
-             "赔率": b["odds"], "已结": bool(b["settled"]),
-             "派彩": b["payout"], "理由": b.get("reason")}
+             "投入积分": b["stake"],
+             "回报系数": b["odds"], "已结": bool(b["settled"]),
+             "结算得分": b["payout"], "理由": b.get("reason")}
             for b in bets
         ],
         "你的近期表现": _performance_summary(me["id"]),
+        "你的人格档案": _agent_personality(
+            {"login": me.get("login"), "persona": me.get("persona"),
+             "name": me.get("name")}),
+        "你的当前心理状态": _psychological_state(me, public),
+        "你的风险护栏": _agent_strategy(
+            {"id": me.get("login"), "persona": me.get("persona")}),
         "你的私有笔记": db.agent_notes_list(me["id"]),
-        "你的融资状态": db.investment_context(me["id"]),
+        "你的积分支持状态": db.investment_context(me["id"]),
         "你的主动任务": [
             {k: task.get(k) for k in ("id", "title", "instruction",
                                       "priority", "created_at", "expires_at")}
             for task in db.agent_tasks_for_context(me["id"])
         ],
-        "你的公开注资邀请": db.funding_invites_context(me["id"]),
+        "你的公开积分援助邀请": db.funding_invites_context(me["id"]),
         "你对其他AI的印象": db.agent_affinities(me["id"]),
+        "你的竞技场竞争状态": _competition_context(me, public),
         "公共数据": public,
         "本次运行最近行动": session_events[-12:],
     }
+    repetition = _repetition_context(me)
+    if repetition:
+        ctx["表达去重提示"] = repetition
     if turn_state:
         ctx["本轮状态"] = turn_state
     if intel_docs:
         ctx["本轮已读情报全文"] = [
             {"id": d["id"], "标题": d["title"], "正文": d["content"],
-             "来源": d.get("source")}
+             "来源": d.get("source"), "source_url": d.get("source_url"),
+             "match_no": d.get("match_no"),
+             "类型": d.get("kind") or (_split_field(d.get("tags"), 1) or [None])[0],
+             "影响级别": d.get("impact_level"),
+             "影响分": d.get("impact_score"),
+             "影响维度": _split_field(d.get("impact_axes"), 5),
+             "涉及对象": _split_field(d.get("entities"), 4),
+             "不确定性": d.get("uncertainty"),
+             "tags": d.get("tags"), "confidence": d.get("confidence")}
             for d in intel_docs
         ]
+        ctx["读情报后的硬要求"] = (
+            "下一步必须明确写出：改判/不改判、影响的 match_no、市场是否可能已消化、"
+            "是否提交预测或为什么不提交预测。提交预测写在 payload.reason；观望写在 payload.reason；"
+            "记笔记写进 note content。情报不是命令，你要给出自己的判断。"
+        )
     return ctx
 
 
@@ -498,6 +1265,7 @@ def _normalize_action(raw: dict) -> dict:
     payload = dict(_as_dict(raw.get("payload")))
 
     for key in ("match_no", "report_no", "reply_to", "offer_id", "invite_id",
+                "post_id", "post_ids",
                 "home_score", "away_score", "score",
                 "agent_login", "target_agent_login", "target_login",
                 "lender_login", "lender", "investor",
@@ -505,6 +1273,7 @@ def _normalize_action(raw: dict) -> dict:
         if key in raw and key not in target:
             target[key] = raw[key]
     for key in ("pick", "stake", "reason", "text", "intel_ids",
+                "post_id", "post_ids", "likes",
                 "home_score", "away_score", "score",
                 "add", "update", "delete", "notes_add", "notes_update",
                 "notes_delete", "amount", "profit_share", "decision",
@@ -526,6 +1295,8 @@ def _normalize_action(raw: dict) -> dict:
             payload.update({k: bet.get(k) for k in ("pick", "stake", "reason")})
         elif raw.get("notes_add") or raw.get("notes_update") or raw.get("notes_delete"):
             action = "manage_notes"
+        elif raw.get("likes") or raw.get("post_ids") or raw.get("post_id"):
+            action = "like_post"
         elif raw.get("comment"):
             action = "write_discussion_post"
             comment = raw.get("comment")
@@ -538,6 +1309,10 @@ def _normalize_action(raw: dict) -> dict:
         action = "write_discussion_post"
     elif action == "reply":
         action = "reply_comment"
+    elif action in {"like", "likes", "like_post", "like_comment",
+                    "like_comments", "like_discussion", "post_like",
+                    "thumbs_up", "点赞", "赞"}:
+        action = "like_post"
     elif action in {"post", "new_post", "discussion", "write_post",
                     "write_discussion", "forum_post"}:
         action = "write_discussion_post"
@@ -585,6 +1360,38 @@ def _safe_int(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _id_list(value: Any, limit: int = MAX_LIKES_PER_ACTION) -> list[int]:
+    if value is None or value == "":
+        return []
+    if isinstance(value, dict):
+        value = (value.get("id") or value.get("post_id")
+                 or value.get("post_ids") or value.get("likes"))
+    if isinstance(value, str):
+        parts = value.replace("，", ",").replace("、", ",").split(",")
+    elif isinstance(value, (list, tuple, set)):
+        parts = list(value)
+    else:
+        parts = [value]
+    out: list[int] = []
+    for item in parts:
+        if isinstance(item, dict):
+            item = item.get("id") or item.get("post_id")
+        n = _safe_int(item)
+        if n is None or n in out:
+            continue
+        out.append(n)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _first_present(*values: Any) -> Any:
+    for value in values:
+        if value is not None and value != "":
+            return value
+    return None
 
 
 def _safe_float(value: Any) -> float | None:
@@ -675,31 +1482,37 @@ def _execute_place_bet(agent_cfg: dict, me: dict, req: dict,
     reason = _clip_text(req["payload"].get("reason"), REASON_MAX)
     table = _betting_table(data)
     if match_no is None or match_no not in table:
-        return _result(agent_cfg, "place_bet", "rejected", "比赛不存在或不可下注")
+        return _result(agent_cfg, "place_bet", "rejected", "比赛不存在或不可提交预测")
     if pick not in ("H", "D", "A"):
         return _result(agent_cfg, "place_bet", "rejected", "pick 必须是 H/D/A")
     if stake is None or stake < MIN_STAKE or stake > MAX_STAKE:
-        return _result(agent_cfg, "place_bet", "rejected", "注额不在允许范围")
+        return _result(agent_cfg, "place_bet", "rejected", "投入积分不在允许范围")
+    stake_issue = _strategy_stake_issue(agent_cfg, stake)
+    if stake_issue:
+        return _result(agent_cfg, "place_bet", "rejected", stake_issue)
     fresh = db.get_user(me["id"])
     if not fresh or stake > int(fresh["balance"]):
         return _result(agent_cfg, "place_bet", "rejected", "余额不足")
     if db.agent_bet_count_for_match(me["id"], match_no) >= 2:
-        return _result(agent_cfg, "place_bet", "rejected", "本场已下注并加仓过")
+        return _result(agent_cfg, "place_bet", "rejected", "本场已提交预测并加仓过")
     entry = table[match_no]
     if _utc(entry["date_utc"]) <= datetime.now(timezone.utc):
-        return _result(agent_cfg, "place_bet", "rejected", "已开球，投注关闭")
+        return _result(agent_cfg, "place_bet", "rejected", "已开球，预测关闭")
     bet = db.place_bet(me["id"], match_no, pick, stake, entry["odds"][pick],
                        reason=reason)
     return _result(agent_cfg, "place_bet", "executed",
-                   f"下注#{match_no} {pick} {stake}@{entry['odds'][pick]}",
-                   {"bet_id": bet["id"], "match_no": match_no})
+                   (f"提交预测#{match_no} {pick} {stake}@{entry['odds'][pick]}"
+                    f" · {entry.get('odds_source')}"),
+                   {"bet_id": bet["id"], "match_no": match_no,
+                    "odds": entry["odds"][pick],
+                    "odds_source": entry.get("odds_source")})
 
 
 def _score_from_req(req: dict) -> tuple[int | None, int | None]:
-    home_score = _safe_int(req["payload"].get("home_score")
-                           or req["target"].get("home_score"))
-    away_score = _safe_int(req["payload"].get("away_score")
-                           or req["target"].get("away_score"))
+    home_score = _safe_int(_first_present(req["payload"].get("home_score"),
+                                          req["target"].get("home_score")))
+    away_score = _safe_int(_first_present(req["payload"].get("away_score"),
+                                          req["target"].get("away_score")))
     raw_score = req["payload"].get("score") or req["target"].get("score")
     if (home_score is None or away_score is None) and raw_score:
         text = str(raw_score).strip().replace("：", "-").replace(":", "-")
@@ -720,7 +1533,7 @@ def _execute_place_score_bet(agent_cfg: dict, me: dict, req: dict,
     table = _betting_table(data)
     if match_no is None or match_no not in table:
         return _result(agent_cfg, "place_score_bet", "rejected",
-                       "比赛不存在或不可下注")
+                       "比赛不存在或不可提交预测")
     if (home_score is None or away_score is None
             or home_score < 0 or away_score < 0
             or home_score > SCORE_MAX_GOALS or away_score > SCORE_MAX_GOALS):
@@ -728,7 +1541,10 @@ def _execute_place_score_bet(agent_cfg: dict, me: dict, req: dict,
                        f"比分必须在 0-{SCORE_MAX_GOALS}")
     if stake is None or stake < MIN_STAKE or stake > MAX_SCORE_STAKE:
         return _result(agent_cfg, "place_score_bet", "rejected",
-                       f"比分注额必须在 {MIN_STAKE}-{MAX_SCORE_STAKE}")
+                       f"比分投入积分必须在 {MIN_STAKE}-{MAX_SCORE_STAKE}")
+    stake_issue = _strategy_stake_issue(agent_cfg, stake, score_bet=True)
+    if stake_issue:
+        return _result(agent_cfg, "place_score_bet", "rejected", stake_issue)
     fresh = db.get_user(me["id"])
     if not fresh or stake > int(fresh["balance"]):
         return _result(agent_cfg, "place_score_bet", "rejected", "余额不足")
@@ -738,17 +1554,17 @@ def _execute_place_score_bet(agent_cfg: dict, me: dict, req: dict,
     entry = table[match_no]
     if _utc(entry["date_utc"]) <= datetime.now(timezone.utc):
         return _result(agent_cfg, "place_score_bet", "rejected",
-                       "已开球，投注关闭")
+                       "已开球，预测关闭")
     key = f"{home_score}-{away_score}"
     odds_val = (entry.get("score_odds") or {}).get(key)
     if odds_val is None:
         return _result(agent_cfg, "place_score_bet", "rejected",
-                       "该比分暂不可投注")
+                       "该比分暂不可预测")
     bet = db.place_score_bet(me["id"], match_no, home_score, away_score,
                              stake, odds_val, reason=reason)
     return _result(
         agent_cfg, "place_score_bet", "executed",
-        f"比分下注#{match_no} {key} {stake}@{odds_val}",
+        f"比分提交预测#{match_no} {key} {stake}@{odds_val}",
         {"score_bet_id": bet["id"], "match_no": match_no,
          "score": key, "amount": stake, "odds": odds_val})
 
@@ -783,6 +1599,9 @@ def _execute_discussion_post(agent_cfg: dict, me: dict, req: dict,
                       or req["payload"].get("content"), COMMENT_MAX)
     if not text:
         return _result(agent_cfg, "write_discussion_post", "rejected", "帖子为空")
+    repeated = _public_text_repetition_issue(me, text)
+    if repeated:
+        return _result(agent_cfg, "write_discussion_post", "rejected", repeated)
     try:
         report_no, match_no, topic_label = _topic_from_req(req, data)
     except ValueError as exc:
@@ -814,6 +1633,9 @@ def _execute_reply(agent_cfg: dict, me: dict, req: dict) -> dict:
         return _result(agent_cfg, "reply_comment", "rejected", "回复目标不存在")
     if not text:
         return _result(agent_cfg, "reply_comment", "rejected", "回复为空")
+    repeated = _public_text_repetition_issue(me, text)
+    if repeated:
+        return _result(agent_cfg, "reply_comment", "rejected", repeated)
     post_id = db.agent_post_add(
         me["id"], parent.get("report_no"), text, reply_to=reply_to,
         match_no=parent.get("match_no"),
@@ -830,6 +1652,69 @@ def _execute_reply(agent_cfg: dict, me: dict, req: dict) -> dict:
                     "topic_label": target, "excerpt": text[:60]})
 
 
+def _like_targets_from_req(req: dict) -> list[int]:
+    values = [
+        req["target"].get("post_ids"),
+        req["target"].get("post_id"),
+        req["payload"].get("post_ids"),
+        req["payload"].get("post_id"),
+        req["payload"].get("likes"),
+        req["raw"].get("post_ids"),
+        req["raw"].get("post_id"),
+        req["raw"].get("likes"),
+        req["raw"].get("like_post"),
+    ]
+    out: list[int] = []
+    for value in values:
+        for post_id in _id_list(value, limit=MAX_LIKES_PER_ACTION):
+            if post_id not in out:
+                out.append(post_id)
+            if len(out) >= MAX_LIKES_PER_ACTION:
+                return out
+    return out
+
+
+def _execute_like_post(agent_cfg: dict, me: dict, req: dict) -> dict:
+    post_ids = _like_targets_from_req(req)
+    if not post_ids:
+        return _result(agent_cfg, "like_post", "rejected", "缺少点赞目标")
+
+    liked: list[int] = []
+    already: list[int] = []
+    skipped: list[dict] = []
+    for post_id in post_ids:
+        parent = db.agent_post_get(post_id)
+        if not parent:
+            skipped.append({"post_id": post_id, "原因": "不存在"})
+            continue
+        if _safe_int(parent.get("agent_id")) == _safe_int(me.get("id")):
+            skipped.append({"post_id": post_id, "原因": "不能给自己点赞"})
+            continue
+        try:
+            row = db.post_like(post_id, me["id"])
+        except ValueError as exc:
+            skipped.append({"post_id": post_id, "原因": str(exc)})
+            continue
+        if row.get("created"):
+            liked.append(post_id)
+        else:
+            already.append(post_id)
+
+    refs = {
+        "liked_post_ids": liked,
+        "already_liked_post_ids": already,
+        "skipped_post_ids": skipped,
+    }
+    if liked:
+        return _result(agent_cfg, "like_post", "executed",
+                       f"点赞讨论帖 {liked}", refs)
+    if already:
+        return _result(agent_cfg, "like_post", "executed",
+                       f"这些帖子已点赞过 {already}", refs)
+    reason = "；".join(f"#{s['post_id']} {s['原因']}" for s in skipped) or "无有效目标"
+    return _result(agent_cfg, "like_post", "rejected", reason, refs)
+
+
 def _execute_notes(agent_cfg: dict, me: dict, req: dict) -> dict:
     payload = req["payload"]
     adds = payload.get("add") or payload.get("notes_add") or req["raw"].get("notes_add") or []
@@ -843,6 +1728,15 @@ def _execute_notes(agent_cfg: dict, me: dict, req: dict) -> dict:
         updates = [updates]
     if not isinstance(deletes, list):
         deletes = [deletes]
+    if not any((adds, updates, deletes)):
+        inline_content = (payload.get("content") or payload.get("text")
+                          or payload.get("note") or req["raw"].get("note"))
+        if inline_content:
+            adds = [{
+                "title": payload.get("title") or req["raw"].get("title")
+                or "行动笔记",
+                "content": inline_content,
+            }]
     refs: dict[str, Any] = {"added": [], "updated": [], "deleted": []}
     for item in adds[:MAX_NOTE_OPS]:
         n = _as_dict(item)
@@ -856,8 +1750,11 @@ def _execute_notes(agent_cfg: dict, me: dict, req: dict) -> dict:
         if note_id and db.agent_note_update(me["id"], note_id,
                                             _clip_text(n.get("title"), 80)
                                             if n.get("title") else None,
-                                            _clip_text(n.get("content"), 1500)
-                                            if n.get("content") else None):
+                                            _clip_text(n.get("content")
+                                                       or n.get("text")
+                                                       or n.get("note"), 1500)
+                                            if (n.get("content") or n.get("text")
+                                                or n.get("note")) else None):
             refs["updated"].append(note_id)
     for item in deletes[:MAX_NOTE_OPS]:
         note_id = _safe_int(item)
@@ -874,8 +1771,8 @@ def _execute_review(agent_cfg: dict, me: dict, req: dict) -> dict:
     text = _clip_text(req["payload"].get("text") or req["payload"].get("note"),
                       1200)
     if not text:
-        text = ("复盘：最近{最近投注数}注，已结{已结算数}注，ROI={ROI}，"
-                "净盈亏={净盈亏}，连亏={当前连亏}。下一轮先看赔率区间和方向偏好，"
+        text = ("复盘：最近{最近预测数}次预测，已结{已结算数}次，ROI={ROI}，"
+                "净盈亏={净盈亏}，连亏={当前连亏}。下一轮先看回报系数区间和方向偏好，"
                 "避免为了行动而行动。").format(**summary)
     note_id = db.agent_note_add(me["id"], f"表现复盘 {time.strftime('%m-%d')}",
                                 text)
@@ -914,10 +1811,10 @@ def _execute_request_investment(agent_cfg: dict, me: dict, req: dict) -> dict:
     reason = _clip_text(req["payload"].get("reason"), REASON_MAX)
     if not lender_login:
         return _result(agent_cfg, "request_investment", "rejected",
-                       "缺少投资方登录")
+                       "缺少支持方登录")
     if amount is None or amount < MIN_STAKE or amount > MAX_INVESTMENT:
         return _result(agent_cfg, "request_investment", "rejected",
-                       f"融资金额必须在 {MIN_STAKE}-{MAX_INVESTMENT}")
+                       f"积分支持金额必须在 {MIN_STAKE}-{MAX_INVESTMENT}")
     if profit_share is None or profit_share < 0 or profit_share > MAX_PROFIT_SHARE:
         return _result(agent_cfg, "request_investment", "rejected",
                        f"分成比例必须在 0-{MAX_PROFIT_SHARE:g}")
@@ -928,7 +1825,7 @@ def _execute_request_investment(agent_cfg: dict, me: dict, req: dict) -> dict:
         return _result(agent_cfg, "request_investment", "rejected", str(exc))
     pct = round(profit_share * 100)
     return _result(agent_cfg, "request_investment", "executed",
-                   f"请求 {lender_login} 投资 {amount}，分成 {pct}%",
+                   f"请求 {lender_login} 支持 {amount}，分成 {pct}%",
                    {"offer_id": offer["id"], "lender_login": lender_login,
                     "amount": amount, "profit_share": profit_share})
 
@@ -941,7 +1838,7 @@ def _execute_respond_investment(agent_cfg: dict, me: dict, req: dict) -> dict:
     reason = _clip_text(req["payload"].get("reason"), REASON_MAX)
     if offer_id is None:
         return _result(agent_cfg, "respond_investment", "rejected",
-                       "缺少融资请求 id")
+                       "缺少积分支持请求 id")
     if not decision:
         return _result(agent_cfg, "respond_investment", "rejected",
                        "缺少 accept/decline 决策")
@@ -950,7 +1847,7 @@ def _execute_respond_investment(agent_cfg: dict, me: dict, req: dict) -> dict:
     except ValueError as exc:
         return _result(agent_cfg, "respond_investment", "rejected", str(exc))
     status = offer["status"]
-    message = ("接受融资请求" if status == "active" else "拒绝融资请求")
+    message = ("接受积分支持请求" if status == "active" else "拒绝积分支持请求")
     return _result(agent_cfg, "respond_investment", "executed",
                    f"{message}#{offer_id}",
                    {"offer_id": offer_id, "investment_status": status,
@@ -978,7 +1875,10 @@ def _execute_create_funding_invite(agent_cfg: dict, me: dict,
     reason = _clip_text(req["payload"].get("reason") or text, 120)
     if not text:
         return _result(agent_cfg, "create_funding_invite", "rejected",
-                       "公开注资邀请需要一条讨论区文案")
+                       "公开积分援助邀请需要一条讨论区文案")
+    repeated = _public_text_repetition_issue(me, text)
+    if repeated:
+        return _result(agent_cfg, "create_funding_invite", "rejected", repeated)
     try:
         invite = db.funding_invite_create(
             me["id"], text, min_amount=min_amount, max_amount=max_amount,
@@ -989,7 +1889,7 @@ def _execute_create_funding_invite(agent_cfg: dict, me: dict,
     pct = round(float(invite["分成"]) * 100)
     return _result(
         agent_cfg, "create_funding_invite", "executed",
-        (f"发布公开注资邀请#{invite['id']} "
+        (f"发布公开积分援助邀请#{invite['id']} "
          f"{invite['最小金额']}-{invite['最大金额']}，分成 {pct}%"),
         {"invite_id": invite["id"], "post_id": invite["帖子"],
          "amount_min": invite["最小金额"], "amount_max": invite["最大金额"],
@@ -1007,10 +1907,10 @@ def _execute_accept_funding_invite(agent_cfg: dict, me: dict,
     reason = _clip_text(req["payload"].get("reason"), REASON_MAX)
     if invite_id is None:
         return _result(agent_cfg, "accept_funding_invite", "rejected",
-                       "缺少公开注资邀请 id")
+                       "缺少公开积分援助邀请 id")
     if amount is None:
         return _result(agent_cfg, "accept_funding_invite", "rejected",
-                       "缺少注资金额")
+                       "缺少积分援助金额")
     try:
         row = db.funding_invite_accept(invite_id, me["id"], amount, reason)
     except ValueError as exc:
@@ -1019,7 +1919,7 @@ def _execute_accept_funding_invite(agent_cfg: dict, me: dict,
     invite = row["invite"]
     return _result(
         agent_cfg, "accept_funding_invite", "executed",
-        f"接受公开注资邀请#{invite_id}，注资 {amount}",
+        f"接受公开积分援助邀请#{invite_id}，积分援助 {amount}",
         {"invite_id": invite_id, "offer_id": inv["id"],
          "investment_status": inv["status"],
          "borrower_id": inv["borrower_id"],
@@ -1062,9 +1962,10 @@ def _execute_action(agent_cfg: dict, me: dict, req: dict,
     if action not in VALID_ACTIONS:
         res = _result(agent_cfg, action or "unknown", "rejected", "未知 action")
     elif (_is_bench_agent(agent_cfg)
-          and action in {*PUBLIC_SPEECH_ACTIONS, "accept_funding_invite"}):
+          and action in {*PUBLIC_SPEECH_ACTIONS, *PUBLIC_SOCIAL_ACTIONS,
+                         "accept_funding_invite"}):
         res = _result(agent_cfg, "pass", "passed",
-                      "本色组不参与公开发言或公开注资，本轮观望")
+                      "本色组不参与公开发言或公开积分援助，本轮观望")
     elif action == "read_data":
         res = _result(agent_cfg, action, "observed", "公共数据已在上下文中")
     elif action == "pass":
@@ -1078,6 +1979,8 @@ def _execute_action(agent_cfg: dict, me: dict, req: dict,
         res = _execute_discussion_post(agent_cfg, me, req, data)
     elif action == "reply_comment":
         res = _execute_reply(agent_cfg, me, req)
+    elif action == "like_post":
+        res = _execute_like_post(agent_cfg, me, req)
     elif action == "manage_notes":
         res = _execute_notes(agent_cfg, me, req)
     elif action == "review_own_performance":
@@ -1117,7 +2020,9 @@ def _event_from_result(round_no: int, res: dict,
                             "amount", "amount_min", "amount_max",
                             "desired_amount", "profit_share",
                             "principal_remaining", "target_login",
-                            "target_name", "before", "after", "delta"}}
+                            "target_name", "before", "after", "delta",
+                            "liked_post_ids", "already_liked_post_ids",
+                            "skipped_post_ids"}}
     if public_refs:
         event["关联对象"] = public_refs
     return event
@@ -1127,12 +2032,16 @@ def _turn_limits(agent_cfg: dict, me: dict, max_steps: int,
                  max_public_posts: int, max_bets: int,
                  max_intel_reads: int) -> dict:
     public_limit = max(0, max_public_posts)
+    if not _is_bench_agent(agent_cfg):
+        public_limit = db.agent_task_public_post_limit(me["id"], public_limit)
     return {
         "max_steps": max(1, max_steps),
         "max_public_posts": public_limit,
         "max_bets": max(0, max_bets),
         "max_intel_reads": max(0, max_intel_reads),
+        "max_likes": 0 if _is_bench_agent(agent_cfg) else DEFAULT_MAX_LIKES_PER_TURN,
         "max_affinity_adjusts": DEFAULT_MAX_AFFINITY_ADJUSTS_PER_TURN,
+        "max_corrections": DEFAULT_MAX_CORRECTIONS_PER_TURN,
     }
 
 
@@ -1145,16 +2054,23 @@ def _turn_state_payload(round_no: int, total: int, step_no: int,
         "剩余步骤": max(limits["max_steps"] - step_no, 0),
         "已读情报": counts["intel_ids"],
         "已读情报次数": f"{counts['intel_reads']}/{limits['max_intel_reads']}",
-        "已下注次数": f"{counts['bets']}/{limits['max_bets']}",
+        "已提交预测次数": f"{counts['bets']}/{limits['max_bets']}",
         "已公开发言次数": (
             f"{counts['public_posts']}/{limits['max_public_posts']}"
         ),
+        "已点赞次数": f"{counts.get('likes', 0)}/{limits['max_likes']}",
         "已调整亲密度次数": (
             f"{counts.get('affinity_adjusts', 0)}/{limits['max_affinity_adjusts']}"
         ),
+        "已纠错次数": (
+            f"{counts.get('corrections', 0)}/{limits['max_corrections']}"
+        ),
         "本轮已执行": turn_events[-6:],
         "上一步结果": turn_events[-1] if turn_events else None,
-        "提示": "每一步只输出一个 JSON action；pass 会结束本次活动。",
+        "提示": (
+            "每一步只输出一个 JSON action；pass 会结束本次活动。"
+            "如果上一步 rejected，请根据错误原因换一个合法动作或降低投入积分。"
+        ),
     }
 
 
@@ -1166,10 +2082,13 @@ def _quota_block(agent_cfg: dict, req: dict, counts: dict,
                        "本轮已读过情报，本次活动结束")
     if action in {"place_bet", "place_score_bet"} and counts["bets"] >= limits["max_bets"]:
         return _result(agent_cfg, "pass", "passed",
-                       "本轮下注额度已用完，本次活动结束")
+                       "本轮提交预测额度已用完，本次活动结束")
     if action in PUBLIC_SPEECH_ACTIONS and counts["public_posts"] >= limits["max_public_posts"]:
         return _result(agent_cfg, "pass", "passed",
                        "本轮公开发言额度已用完，本次活动结束")
+    if action == "like_post" and counts.get("likes", 0) >= limits["max_likes"]:
+        return _result(agent_cfg, "pass", "passed",
+                       "本轮点赞额度已用完，本次活动结束")
     if action == "adjust_affinity" and counts.get("affinity_adjusts", 0) >= limits["max_affinity_adjusts"]:
         return _result(agent_cfg, "pass", "passed",
                        "本轮亲密度调整额度已用完，本次活动结束")
@@ -1187,6 +2106,10 @@ def _count_executed_action(req: dict, res: dict, counts: dict) -> None:
         counts["bets"] += 1
     elif action in PUBLIC_SPEECH_ACTIONS:
         counts["public_posts"] += 1
+    elif action == "like_post":
+        refs = res.get("created_refs") or {}
+        n = len(refs.get("liked_post_ids") or []) + len(refs.get("already_liked_post_ids") or [])
+        counts["likes"] = counts.get("likes", 0) + max(1, n)
     elif action == "adjust_affinity":
         counts["affinity_adjusts"] = counts.get("affinity_adjusts", 0) + 1
 
@@ -1207,7 +2130,8 @@ def run_round(round_no: int, total: int, agent_cfg: dict, gw: Gateway,
     limits = _turn_limits(agent_cfg, me, max_steps, max_public_posts,
                           max_bets, max_intel_reads)
     counts = {"intel_reads": 0, "intel_ids": [], "bets": 0,
-              "public_posts": 0, "affinity_adjusts": 0}
+              "public_posts": 0, "affinity_adjusts": 0,
+              "likes": 0, "corrections": 0}
     intel_docs: list[dict] = []
     turn_events: list[dict] = []
     results: list[dict] = []
@@ -1220,7 +2144,12 @@ def run_round(round_no: int, total: int, agent_cfg: dict, gw: Gateway,
                           "本次活动中 token 预算已尽")
             res = _record(me, agent_cfg, req, res)
             results.append(res)
-            turn_events.append(_event_from_result(round_no, res, step_no))
+            event = _event_from_result(round_no, res, step_no)
+            turn_events.append(event)
+            session_events.append(event)
+            if counts["corrections"] < limits["max_corrections"]:
+                counts["corrections"] += 1
+                continue
             break
 
         me = db.get_user(me["id"]) or me
@@ -1236,7 +2165,13 @@ def run_round(round_no: int, total: int, agent_cfg: dict, gw: Gateway,
                           f"解析或模型调用失败: {str(exc)[:120]}")
             res = _record(me, agent_cfg, req, res)
             results.append(res)
-            turn_events.append(_event_from_result(round_no, res, step_no))
+            event = _event_from_result(round_no, res, step_no)
+            turn_events.append(event)
+            session_events.append(event)
+            if counts["corrections"] < limits["max_corrections"]:
+                counts["corrections"] += 1
+                time.sleep(0.4)
+                continue
             break
 
         blocked = _quota_block(agent_cfg, req, counts, limits)
@@ -1261,6 +2196,11 @@ def run_round(round_no: int, total: int, agent_cfg: dict, gw: Gateway,
         turn_events.append(event)
         session_events.append(event)
 
+        if (res["status"] == "rejected"
+                and counts["corrections"] < limits["max_corrections"]):
+            counts["corrections"] += 1
+            time.sleep(0.4)
+            continue
         if (res["action"] == "pass"
                 or (res["action"] == "request_investment"
                     and res["status"] == "executed")
@@ -1299,6 +2239,13 @@ def run_session(rounds: int | None = None, min_rounds: int = 15,
     if total < 0:
         raise ValueError("rounds 不能为负数")
     gw = Gateway()
+    agent_users = {}
+    for agent in agents:
+        try:
+            agent_users[agent["id"]] = _ensure_agent(agent, gw)
+        except Exception:
+            continue
+    _seed_shock_tasks(data, agents)
     session_events: list[dict] = []
     results = []
     prev = None
@@ -1308,7 +2255,7 @@ def run_session(rounds: int | None = None, min_rounds: int = 15,
         forced_offer = None
         pending_offer = db.investment_pending_oldest()
         if pending_offer:
-            lender_login = str(pending_offer.get("投资方登录") or "").strip().lower()
+            lender_login = str(pending_offer.get("支持方登录") or "").strip().lower()
             forced_agent = agents_by_login.get(lender_login)
         else:
             forced_agent = None
@@ -1316,10 +2263,17 @@ def run_session(rounds: int | None = None, min_rounds: int = 15,
             agent = forced_agent
             forced_offer = pending_offer
             if forced_offer:
-                print(f"  [agent-session] 融资请求#{forced_offer['id']} "
+                print(f"  [agent-session] 积分支持请求#{forced_offer['id']} "
                       f"等待 {agent['name']} 回应，本轮优先调度")
         else:
-            pool = [a for a in agents if a.get("id") != prev] or agents
+            task_pool = []
+            for a in agents:
+                if a.get("id") == prev:
+                    continue
+                me = agent_users.get(a.get("id"))
+                if me and db.agent_tasks_for_context(me["id"], limit=1):
+                    task_pool.append(a)
+            pool = task_pool or [a for a in agents if a.get("id") != prev] or agents
             agent = rng.choice(pool)
         prev = agent["id"]
         public = _public_context(data)
@@ -1361,7 +2315,7 @@ def run_session(rounds: int | None = None, min_rounds: int = 15,
                       f"{auto_res['agent_name']}: {auto_res['action']} · "
                       f"{auto_res['status']} · {auto_res['message']}")
             except Exception as exc:  # noqa: BLE001
-                print(f"  [agent-session] 融资请求#{forced_offer['id']} "
+                print(f"  [agent-session] 积分支持请求#{forced_offer['id']} "
                       f"自动处理失败: {str(exc)[:120]}")
         time.sleep(1)
     return results
@@ -1384,7 +2338,7 @@ def main() -> None:
                         help="每个 AI 活动轮最多公开发言次数")
     parser.add_argument("--max-bets-per-turn", type=int,
                         default=DEFAULT_MAX_BETS_PER_TURN,
-                        help="每个 AI 活动轮最多下注次数")
+                        help="每个 AI 活动轮最多提交预测次数")
     parser.add_argument("--max-intel-reads-per-turn", type=int,
                         default=DEFAULT_MAX_INTEL_READS_PER_TURN,
                         help="每个 AI 活动轮最多读取情报次数")

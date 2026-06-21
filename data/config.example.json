@@ -1,58 +1,116 @@
 {
- "site_url": "https://你的域名",
- "allowed_origins": ["https://你的域名"],
- "odds_api_key": "在 the-odds-api.com 免费注册获取（可选；不配置则纯模型运行，不融合盘口）",
- "llm": {
-  "base_url": "https://你的OpenAI兼容接口/v1（可选；不配置则战报由人工撰写）",
-  "api_key": "...",
-  "model": "...",
-  "commenter_model": "（可选，跟评模型，默认同 model）"
+ "site_url": "https://你的主域名",
+ "allowed_origins": ["https://你的主域名", "https://你的短域名"],
+ "odds_api_key": "在 the-odds-api.com 免费注册获取（可选；不配置则纯模型运行，不融合市场参考）",
+ "prediction": {
+  "model_weight": 0.45,
+  "model_weight_strong_market": 0.35,
+  "strong_market_books": 15,
+  "strong_market_disagreement": 0.08,
+  "probability_temperature": 1.25,
+  "draw_boost_max": 0.025,
+  "draw_market_min": 0.27,
+  "draw_close_margin": 0.12,
+  "draw_favorite_max": 0.5,
+  "draw_total_goals_max": 2.55
  },
  "github_oauth": {
-  "client_id": "GitHub OAuth App 的 Client ID（可选，投注登录用）",
+  "client_id": "GitHub OAuth App 的 Client ID（可选，预测登录用）",
   "client_secret": "...",
   "callback_url": "https://你的域名/api/auth/callback"
  },
  "session_secret": "随机 64 位 hex（会话签名密钥）",
  "gateway": {
+  "base_url": "http://127.0.0.1:8787/v1",
+  "api_key": "PI_SERVE_TOKEN（pi-serve 本机无鉴权可留空）",
   "models": [
-   {
-    "id": "claude",
-    "label": "Claude",
-    "protocol": "anthropic",
-    "base_url": "https://api.anthropic.com",
-    "api_key": "待填",
-    "model": "claude-sonnet-4-6"
-   },
    {
     "id": "gpt",
     "label": "GPT",
-    "protocol": "openai",
-    "base_url": "https://api.openai.com/v1",
-    "api_key": "待填",
-    "model": "gpt-5.2"
+    "model": "openai-codex/gpt-5.4"
    },
    {
     "id": "gemini",
     "label": "Gemini",
-    "protocol": "gemini",
-    "base_url": "https://generativelanguage.googleapis.com",
-    "api_key": "待填",
-    "model": "gemini-3-flash"
+    "model": "google/gemini-2.5-pro"
+   },
+   {
+    "id": "glm",
+    "label": "GLM",
+    "model": "zai-coding-cn/glm-5.2"
+   },
+   {
+    "id": "doubao",
+    "label": "豆包",
+    "model": "从 pi-serve /v1/models 复制完整 doubao id"
+   },
+   {
+    "id": "kimi",
+    "label": "Kimi",
+    "model": "moonshotai-cn/kimi-k2.7-code"
    }
   ]
  },
  "arena": {
   "agents": [
    {
-    "id": "claude-bettor",
-    "name": "Claude",
-    "model": "claude",
-    "persona": "谨慎的价值投资者，只在赔率与判断出现偏差时出手"
+    "id": "glm-bettor",
+    "name": "GLM",
+    "model": "glm",
+    "persona": "谨慎的价值观察者，只在回报系数与判断出现偏差时出手"
+   },
+   {
+    "id": "kimi-fun",
+    "name": "Kimi「月谋」",
+    "model": "kimi",
+    "persona": "长上下文档案官：先读情报和旧账，把多条线索串成场景树；提交预测不快，偏爱小分验证被忽略的上下文。"
+   },
+   {
+    "id": "kimi-bench",
+    "name": "Kimi",
+    "model": "kimi",
+    "persona": ""
    }
   ],
   "daily_token_budget": 200000,
   "max_bets_per_run": 3
+ },
+ "ops": {
+  "content": {
+   "editor_model": "glm",
+   "writer_model": "glm",
+   "commenter_model": "gpt"
+  },
+  "intel_update": {
+   "editor_model": "glm",
+   "window_hours": 72,
+   "lookback_hours": 36,
+   "max_articles_per_run": 8,
+   "editor_max_tokens": 1800,
+   "max_per_feed": 30,
+   "min_candidate_score": 85,
+   "timeout": 20,
+   "feeds": [
+    {
+     "id": "bbc-football",
+     "name": "BBC Sport Football",
+     "url": "https://feeds.bbci.co.uk/sport/football/rss.xml",
+     "priority": 90
+    },
+    {
+     "id": "guardian-football",
+     "name": "The Guardian Football",
+     "url": "https://www.theguardian.com/football/rss",
+     "priority": 86
+    },
+    {
+     "id": "sky-football",
+     "name": "Sky Sports Football",
+     "url": "https://www.skysports.com/rss/12040",
+     "priority": 76
+    }
+   ]
+  }
  },
  "advisor_cap": 5
 }

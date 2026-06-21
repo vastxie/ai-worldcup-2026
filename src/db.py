@@ -4,7 +4,7 @@
 - 数据库是唯一事实源；web/data.js 等静态产物由 DB 导出生成。
 - 核心赛事表（matches/locks/...）由更新管线读写；
   竞技场表（users/bets/...）由 API 服务与 Agent 调度器读写。
-- 所有写入走事务；投注/结算相关操作必须用 transaction() 包裹。
+- 所有写入走事务；预测/结算相关操作必须用 transaction() 包裹。
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ PUBLIC_ADVISOR_MODEL = "codex"
 PUBLIC_ADVISOR_STYLE = "赛事情报审稿员，把临场消息折成克制的概率修正。"
 LEGACY_ADVISOR_LOGIN = "fable"
 LEGACY_ADVISOR_LOGINS = {LEGACY_ADVISOR_LOGIN, "claude-code"}
+MATCH_SOURCE_PRIORITY = {"feed": 0, "espn": 1, "manual": 2}
 
 
 def _login_key(login: str | None) -> str:
@@ -37,6 +38,10 @@ def _is_legacy_advisor(login: str | None = None, name: str | None = None,
 
 def _is_public_advisor_login(login: str | None) -> bool:
     return _login_key(login) in {PUBLIC_ADVISOR_LOGIN, *LEGACY_ADVISOR_LOGINS}
+
+
+def _match_source_priority(source: str | None) -> int:
+    return MATCH_SOURCE_PRIORITY.get(str(source or "feed").lower(), 0)
 
 SCHEMA = """
 -- ============ 核心赛事数据 ============
@@ -54,7 +59,7 @@ CREATE TABLE IF NOT EXISTS matches (
   score_home INTEGER,
   score_away INTEGER,
   winner     TEXT,
-  source     TEXT DEFAULT 'feed'      -- feed / manual
+  source     TEXT DEFAULT 'feed'      -- feed / espn / manual
 );
 
 CREATE TABLE IF NOT EXISTS locks (    -- 赛前锁档（开球后只读）
@@ -107,13 +112,13 @@ CREATE TABLE IF NOT EXISTS champ_history (  -- 每日快照（走势图 + 本轮
   advance_json  TEXT                         -- 全队出线（晋级32强）概率（本轮影响面板）
 );
 
-CREATE TABLE IF NOT EXISTS odds_snapshots ( -- 盘口快照存档（审计）
+CREATE TABLE IF NOT EXISTS odds_snapshots ( -- 市场参考快照存档（审计）
   id   INTEGER PRIMARY KEY AUTOINCREMENT,
   ts   TEXT, kind TEXT,                     -- h2h / winner
   payload_json TEXT
 );
 
--- ============ 竞技场：用户 / 投注 / 账本 ============
+-- ============ 竞技场：用户 / 预测 / 账本 ============
 CREATE TABLE IF NOT EXISTS users (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   kind       TEXT NOT NULL DEFAULT 'human', -- human / agent
@@ -133,10 +138,10 @@ CREATE TABLE IF NOT EXISTS bets (
   match_no  INTEGER NOT NULL,
   pick      TEXT NOT NULL CHECK (pick IN ('H','D','A')),
   stake     INTEGER NOT NULL CHECK (stake > 0),
-  odds      REAL NOT NULL,                  -- 下注瞬间锁定的赔率
+  odds      REAL NOT NULL,                  -- 提交预测瞬间锁定的回报系数
   placed_at TEXT,
   settled   INTEGER NOT NULL DEFAULT 0,
-  payout    INTEGER NOT NULL DEFAULT 0,     -- 派彩含本金，输=0
+  payout    INTEGER NOT NULL DEFAULT 0,     -- 结算得分含本金，输=0
   settled_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_bets_match ON bets(match_no, settled);
@@ -279,7 +284,18 @@ CREATE TABLE IF NOT EXISTS intel (          -- 情报区：人工收集的赛事
   date    TEXT,
   title   TEXT NOT NULL,
   content TEXT NOT NULL,
-  source  TEXT
+  source  TEXT,
+  match_no INTEGER,
+  source_url TEXT,
+  content_hash TEXT,
+  tags TEXT,
+  confidence REAL,
+  kind TEXT,
+  impact_score REAL,
+  impact_level TEXT,
+  impact_axes TEXT,
+  entities TEXT,
+  uncertainty TEXT
 );
 
 CREATE TABLE IF NOT EXISTS post_likes (     -- 圆桌评论点赞（人类+AI 通用）
@@ -329,7 +345,7 @@ def init_db(conn: sqlite3.Connection | None = None) -> None:
     own = conn is None
     conn = conn or connect()
     conn.executescript(SCHEMA)
-    try:  # 增量迁移：投注理由（AI 下注的"嘴硬记录"）
+    try:  # 增量迁移：预测理由（AI 提交预测的"嘴硬记录"）
         conn.execute("ALTER TABLE bets ADD COLUMN reason TEXT")
     except sqlite3.OperationalError:
         pass
@@ -387,6 +403,22 @@ def init_db(conn: sqlite3.Connection | None = None) -> None:
             conn.execute(f"ALTER TABLE fable_adjust ADD COLUMN {col}")
         except sqlite3.OperationalError:
             pass
+    for col in ("match_no INTEGER", "source_url TEXT", "content_hash TEXT",
+                "tags TEXT", "confidence REAL", "kind TEXT",
+                "impact_score REAL", "impact_level TEXT",
+                "impact_axes TEXT", "entities TEXT", "uncertainty TEXT"):
+        try:  # 增量迁移：自动情报收集的去重和比赛关联字段
+            conn.execute(f"ALTER TABLE intel ADD COLUMN {col}")
+        except sqlite3.OperationalError:
+            pass
+    conn.execute("""CREATE INDEX IF NOT EXISTS idx_intel_match
+                    ON intel(match_no, id DESC)""")
+    conn.execute("""CREATE UNIQUE INDEX IF NOT EXISTS uq_intel_source_url
+                    ON intel(source_url)
+                    WHERE source_url IS NOT NULL AND source_url != ''""")
+    conn.execute("""CREATE UNIQUE INDEX IF NOT EXISTS uq_intel_content_hash
+                    ON intel(content_hash)
+                    WHERE content_hash IS NOT NULL AND content_hash != ''""")
     conn.execute("""UPDATE users
                     SET login=?, name=?, model=?,
                         persona=COALESCE(NULLIF(persona, ''), ?)
@@ -429,7 +461,7 @@ def match_row_to_dict(r: sqlite3.Row) -> dict:
         "group": r["grp"], "date_utc": r["date_utc"], "venue": r["venue"],
         "home": r["home"], "away": r["away"],
         "slot_home": r["slot_home"], "slot_away": r["slot_away"],
-        "score": score, "winner": r["winner"],
+        "score": score, "winner": r["winner"], "source": r["source"],
     }
 
 
@@ -443,16 +475,27 @@ def load_matches(conn: sqlite3.Connection | None = None) -> list[dict]:
 
 
 def upsert_matches(matches: list[dict], source: str = "feed") -> None:
-    """整批写入赛程。手动录入(source=manual)的比分不被 feed 覆盖。"""
+    """整批写入赛程；比分来源优先级为 manual > espn > feed。"""
     with transaction() as conn:
         for m in matches:
             score = m.get("score") or [None, None]
+            incoming_has_score = score[0] is not None and score[1] is not None
             existing = conn.execute(
-                "SELECT source, score_home FROM matches WHERE match_no=?",
+                "SELECT source, score_home, score_away FROM matches WHERE match_no=?",
                 (m["match"],)).fetchone()
-            keep_manual = (existing and existing["source"] == "manual"
-                           and existing["score_home"] is not None
-                           and source == "feed")
+            existing_has_score = (
+                existing is not None
+                and existing["score_home"] is not None
+                and existing["score_away"] is not None
+            )
+            keep_existing_score = bool(
+                existing_has_score
+                and (
+                    not incoming_has_score
+                    or _match_source_priority(existing["source"])
+                    > _match_source_priority(source)
+                )
+            )
             conn.execute("""
                 INSERT INTO matches (match_no, round, stage, grp, date_utc,
                     venue, home, away, slot_home, slot_away,
@@ -466,13 +509,14 @@ def upsert_matches(matches: list[dict], source: str = "feed") -> None:
                   slot_home=excluded.slot_home, slot_away=excluded.slot_away,
                   score_home=CASE WHEN ? THEN score_home ELSE excluded.score_home END,
                   score_away=CASE WHEN ? THEN score_away ELSE excluded.score_away END,
-                  winner=CASE WHEN ? THEN winner ELSE COALESCE(excluded.winner, winner) END,
+                  winner=CASE WHEN ? THEN winner ELSE excluded.winner END,
                   source=CASE WHEN ? THEN source ELSE excluded.source END
             """, (m["match"], m.get("round"), m.get("stage"), m.get("group"),
                   m.get("date_utc"), m.get("venue"), m.get("home"),
                   m.get("away"), m.get("slot_home"), m.get("slot_away"),
                   score[0], score[1], m.get("winner"), source,
-                  keep_manual, keep_manual, keep_manual, keep_manual))
+                  keep_existing_score, keep_existing_score,
+                  keep_existing_score, keep_existing_score))
 
 
 def record_manual_score(match_no: int, gh: int, ga: int,
@@ -788,8 +832,8 @@ def _investment_public_row(row: sqlite3.Row | dict) -> dict:
         "id": d["id"],
         "借方": d.get("borrower_name") or d.get("borrower_login"),
         "借方登录": d.get("borrower_login"),
-        "投资方": d.get("lender_name") or d.get("lender_login"),
-        "投资方登录": d.get("lender_login"),
+        "支持方": d.get("lender_name") or d.get("lender_login"),
+        "支持方登录": d.get("lender_login"),
         "金额": d["amount"],
         "分成": d["profit_share"],
         "状态": d["status"],
@@ -838,15 +882,15 @@ def investment_context(user_id: int) -> dict:
     conn = connect()
     try:
         return {
-            "待你处理的融资请求": _investment_select(
+            "待你处理的积分支持请求": _investment_select(
                 conn, "i.status='pending' AND i.lender_id=?", (user_id,), 8),
             "你发出的待处理请求": _investment_select(
                 conn, "i.status='pending' AND i.borrower_id=?", (user_id,), 8),
-            "你的债务": _investment_select(
+            "你的积分债务": _investment_select(
                 conn, "i.status='active' AND i.borrower_id=?", (user_id,), 8),
             "你的应收": _investment_select(
                 conn, "i.status='active' AND i.lender_id=?", (user_id,), 8),
-            "融资冷却": investment_cooldown_status(user_id, conn=conn),
+            "积分支持冷却": investment_cooldown_status(user_id, conn=conn),
         }
     finally:
         conn.close()
@@ -877,16 +921,16 @@ def investment_cooldown_status(user_id: int,
             "剩余小时": remain,
             "上一请求": {
                 "id": row["id"],
-                "投资方": row["lender_name"] or row["lender_login"],
-                "投资方登录": row["lender_login"],
+                "支持方": row["lender_name"] or row["lender_login"],
+                "支持方登录": row["lender_login"],
                 "金额": row["amount"],
                 "分成": row["profit_share"],
                 "状态": row["status"],
                 "创建时间": row["created_at"],
             },
             "提示": ("冷却中：可以先在评论区沟通、写画像笔记，"
-                   "不要重复正式融资申请。"
-                   if remain > 0 else "可以发起一次正式融资请求。"),
+                   "不要重复正式积分支持申请。"
+                   if remain > 0 else "可以发起一次正式积分支持请求。"),
         }
     finally:
         if own:
@@ -936,9 +980,9 @@ def _require_persona_agent(conn: sqlite3.Connection, user_id: int,
     if not row:
         raise ValueError(f"{role} AI 不存在")
     if _is_public_advisor_login(row["login"]):
-        raise ValueError("公共顾问不参与公开注资")
+        raise ValueError("公共顾问不参与公开积分援助")
     if not str(row["persona"] or "").strip():
-        raise ValueError("本色组不参与公开注资")
+        raise ValueError("本色组不参与公开积分援助")
     return row
 
 
@@ -1040,10 +1084,10 @@ def investment_profile_lines(user_id: int, limit: int = 4) -> list[dict]:
     for row in debts:
         lines.append({
             "kind": "debt",
-            "label": "债务",
+            "label": "积分债务",
             "amount": row["剩余本金"],
-            "counterparty": row["投资方"],
-            "counterparty_login": row["投资方登录"],
+            "counterparty": row["支持方"],
+            "counterparty_login": row["支持方登录"],
         })
     for row in receivables:
         lines.append({
@@ -1079,9 +1123,9 @@ def investment_request_create(borrower_id: int, lender_login: str, amount: int,
                               profit_share: float, reason: str) -> dict:
     lender_key = _login_key(lender_login)
     if amount <= 0:
-        raise ValueError("融资金额必须为正")
+        raise ValueError("积分支持金额必须为正")
     if amount > INVESTMENT_AMOUNT_CAP:
-        raise ValueError(f"单次融资金额不能超过 {INVESTMENT_AMOUNT_CAP}")
+        raise ValueError(f"单次积分支持金额不能超过 {INVESTMENT_AMOUNT_CAP}")
     if not (0 <= profit_share <= INVESTMENT_PROFIT_SHARE_CAP):
         raise ValueError(
             f"分成比例必须在 0-{INVESTMENT_PROFIT_SHARE_CAP} 之间")
@@ -1095,21 +1139,21 @@ def investment_request_create(borrower_id: int, lender_login: str, amount: int,
             "SELECT * FROM users WHERE kind='agent' AND lower(COALESCE(login,''))=?",
             (lender_key,)).fetchone()
         if not lender:
-            raise ValueError("投资方 AI 不存在")
+            raise ValueError("支持方 AI 不存在")
         if _is_public_advisor_login(lender["login"]):
-            raise ValueError("公共顾问不参与投融资")
+            raise ValueError("公共顾问不参与积分互助")
         if lender["id"] == borrower_id:
-            raise ValueError("不能向自己融资")
+            raise ValueError("不能向自己积分支持")
         existing = conn.execute("""
             SELECT id FROM agent_investments
             WHERE borrower_id=? AND status IN ('pending', 'active')
         """, (borrower_id,)).fetchone()
         if existing:
-            raise ValueError("你已有待处理或未还清的融资")
+            raise ValueError("你已有待处理或未还清的积分支持")
         cooldown = investment_cooldown_status(borrower_id, conn=conn)
         if not cooldown.get("可发起"):
             raise ValueError(
-                f"融资冷却中，约 {cooldown.get('剩余小时', 0)} 小时后才能再次发起；"
+                f"积分支持冷却中，约 {cooldown.get('剩余小时', 0)} 小时后才能再次发起；"
                 "先去评论区沟通或写画像笔记。")
         cur = conn.execute("""INSERT INTO agent_investments
             (borrower_id, lender_id, amount, profit_share, status, reason,
@@ -1125,7 +1169,7 @@ def investment_request_create(borrower_id: int, lender_login: str, amount: int,
 def investment_respond(offer_id: int, lender_id: int, decision: str,
                        reason: str) -> dict:
     decision = (decision or "").strip().lower()
-    accept = decision in {"accept", "accepted", "yes", "y", "投资", "同意"}
+    accept = decision in {"accept", "accepted", "yes", "y", "支持", "同意"}
     decline = decision in {"decline", "declined", "reject", "rejected", "no",
                            "n", "拒绝", "不投"}
     if not accept and not decline:
@@ -1136,9 +1180,9 @@ def investment_respond(offer_id: int, lender_id: int, decision: str,
             WHERE id=? AND status='pending'
         """, (offer_id,)).fetchone()
         if not row:
-            raise ValueError("融资请求不存在或已处理")
+            raise ValueError("积分支持请求不存在或已处理")
         if int(row["lender_id"]) != int(lender_id):
-            raise ValueError("只有被请求的投资方可以回应")
+            raise ValueError("只有被请求的支持方可以回应")
         if decline:
             conn.execute("""UPDATE agent_investments
                             SET status='declined', response_reason=?,
@@ -1150,7 +1194,7 @@ def investment_respond(offer_id: int, lender_id: int, decision: str,
                                   WHERE id=? AND balance >= ?""",
                                (row["amount"], lender_id, row["amount"]))
             if cur.rowcount != 1:
-                raise ValueError("投资方余额不足")
+                raise ValueError("支持方余额不足")
             conn.execute("UPDATE users SET balance = balance + ? WHERE id=?",
                          (row["amount"], row["borrower_id"]))
             ts = now()
@@ -1327,11 +1371,11 @@ def _settle_investments_after_payout(conn: sqlite3.Connection,
 
 def place_bet(user_id: int, match_no: int, pick: str, stake: int,
               odds: float, reason: str | None = None) -> dict:
-    """事务下注：校验余额、扣款、记账。调用方负责开球时间与赔率校验。"""
+    """事务提交预测：校验余额、扣款、记账。调用方负责开球时间与回报系数校验。"""
     if stake <= 0:
-        raise ValueError("注额必须为正")
+        raise ValueError("投入积分必须为正")
     with transaction() as conn:
-        # 余额检查和扣款必须是一条条件写入，避免并发下注用同一份旧余额过检。
+        # 余额检查和扣款必须是一条条件写入，避免并发提交预测用同一份旧余额过检。
         cur = conn.execute("""UPDATE users SET balance = balance - ?
                               WHERE id=? AND balance >= ?""",
                            (stake, user_id, stake))
@@ -1355,9 +1399,9 @@ def place_bet(user_id: int, match_no: int, pick: str, stake: int,
 def place_score_bet(user_id: int, match_no: int, home_score: int,
                     away_score: int, stake: int, odds: float,
                     reason: str | None = None) -> dict:
-    """事务比分下注：调用方负责开球时间与赔率校验。"""
+    """事务比分提交预测：调用方负责开球时间与回报系数校验。"""
     if stake <= 0:
-        raise ValueError("注额必须为正")
+        raise ValueError("投入积分必须为正")
     if home_score < 0 or away_score < 0 or home_score > 10 or away_score > 10:
         raise ValueError("比分不在允许范围")
     with transaction() as conn:
@@ -1384,7 +1428,7 @@ def place_score_bet(user_id: int, match_no: int, home_score: int,
 
 
 def settle_finished_bets() -> int:
-    """幂等结算所有已完赛比赛的未结投注。返回结算笔数。"""
+    """幂等结算所有已完赛比赛的未结预测。返回结算笔数。"""
     settled = 0
     with transaction() as conn:
         rows = conn.execute("""
@@ -1442,7 +1486,7 @@ def settle_finished_bets() -> int:
 
 
 def _strategy_tags_from_rows(rows: list) -> list[str]:
-    """根据一名选手的全部投注行算"打法"标签（纯计算、不查库，避免 N+1）。"""
+    """根据一名选手的全部预测行算"打法"标签（纯计算、不查库，避免 N+1）。"""
     n = len(rows)
     if n < 2:
         return []  # 样本不足就不打标签，等真有打法了再"长"出来
@@ -1467,7 +1511,7 @@ def _strategy_tags_from_rows(rows: list) -> list[str]:
     if high_hits and high_share >= 0.20:
         tags.append("冷门捕手")
     elif high_share >= 0.38 or avg_odds >= 2.35:
-        tags.append("高赔率猎手")
+        tags.append("高回报系数猎手")
     if draw_share >= 0.30:
         tags.append("防平专家")
     if low_share >= 0.62 or avg_odds <= 1.75:
@@ -1528,7 +1572,7 @@ def leaderboard(limit: int = 100) -> list[dict]:
             + COALESCE(ba.in_play, 0) + COALESCE(sa.in_play, 0)
             - COALESCE(debt.debt, 0) + COALESCE(rec.receivable, 0)) DESC
         LIMIT ?""", (limit,)).fetchall()
-    # 一次性拉全部投注，内存按选手分组算标签——避免每个 agent 单独查库（N+1）
+    # 一次性拉全部预测，内存按选手分组算标签——避免每个 agent 单独查库（N+1）
     bets_by_user: dict[int, list] = {}
     for b in conn.execute("SELECT user_id, pick, stake, odds, settled, payout "
                           "FROM bets").fetchall():
@@ -1769,8 +1813,8 @@ def _funding_invite_public_row(row: sqlite3.Row | dict) -> dict:
         "分成": float(d["profit_share"]),
         "状态": d["status"],
         "理由": d.get("reason"),
-        "已注资": int(d.get("contributed") or 0),
-        "注资人数": int(d.get("contributors") or 0),
+        "已积分援助": int(d.get("contributed") or 0),
+        "积分援助人数": int(d.get("contributors") or 0),
         "创建时间": d.get("created_at"),
         "过期时间": d.get("expires_at"),
         "关闭时间": d.get("closed_at"),
@@ -1817,10 +1861,10 @@ def funding_invites_context(user_id: int) -> dict:
                            (user_id,)).fetchone()
         if not _is_persona_agent_row(row):
             return {
-                "提示": "本色组不参与公开注资邀请。",
-                "可接受的公开注资邀请": [],
-                "你创建的公开注资邀请": [],
-                "你已响应的注资邀请": [],
+                "提示": "本色组不参与公开积分援助邀请。",
+                "可接受的公开积分援助邀请": [],
+                "你创建的公开积分援助邀请": [],
+                "你已响应的积分援助邀请": [],
             }
         own = _funding_invite_select(
             conn, "fi.borrower_id=? AND fi.status IN ('open','closed')",
@@ -1856,9 +1900,9 @@ def funding_invites_context(user_id: int) -> dict:
             "时间": r["created_at"],
         } for r in rows]
         return {
-            "可接受的公开注资邀请": available,
-            "你创建的公开注资邀请": own,
-            "你已响应的注资邀请": responded,
+            "可接受的公开积分援助邀请": available,
+            "你创建的公开积分援助邀请": own,
+            "你已响应的积分援助邀请": responded,
         }
 
 
@@ -1871,21 +1915,21 @@ def funding_invite_create(borrower_id: int, text: str,
                           hours: float | int | None = None) -> dict:
     text = " ".join(str(text or "").split())[:220]
     if not text:
-        raise ValueError("公开注资邀请需要一条讨论区文案")
+        raise ValueError("公开积分援助邀请需要一条讨论区文案")
     min_amount = int(min_amount or FUNDING_INVITE_MIN_AMOUNT)
     max_amount = int(max_amount or FUNDING_INVITE_MAX_AMOUNT)
     if min_amount < FUNDING_INVITE_MIN_AMOUNT:
-        raise ValueError(f"最小注资不能低于 {FUNDING_INVITE_MIN_AMOUNT}")
+        raise ValueError(f"最小积分援助不能低于 {FUNDING_INVITE_MIN_AMOUNT}")
     if max_amount > FUNDING_INVITE_MAX_AMOUNT:
-        raise ValueError(f"单人最大注资不能超过 {FUNDING_INVITE_MAX_AMOUNT}")
+        raise ValueError(f"单人最大积分援助不能超过 {FUNDING_INVITE_MAX_AMOUNT}")
     if min_amount > max_amount:
-        raise ValueError("最小注资不能大于最大注资")
+        raise ValueError("最小积分援助不能大于最大积分援助")
     if desired_amount is not None:
         desired_amount = int(desired_amount)
         if desired_amount < min_amount:
-            raise ValueError("目标金额不能低于最小注资")
+            raise ValueError("目标金额不能低于最小积分援助")
         if desired_amount > FUNDING_INVITE_MAX_AMOUNT * 5:
-            raise ValueError("公开注资目标金额过高")
+            raise ValueError("公开积分援助目标金额过高")
     profit_share = float(0.5 if profit_share is None else profit_share)
     if not (0 <= profit_share <= INVESTMENT_PROFIT_SHARE_CAP):
         raise ValueError(f"分成比例必须在 0-{INVESTMENT_PROFIT_SHARE_CAP:g}")
@@ -1900,7 +1944,7 @@ def funding_invite_create(borrower_id: int, text: str,
             ORDER BY id DESC LIMIT 1
         """, (borrower_id,)).fetchone()
         if existing:
-            raise ValueError("你已有一个公开注资邀请，先去讨论区继续游说")
+            raise ValueError("你已有一个公开积分援助邀请，先去讨论区继续游说")
         cur = conn.execute("""INSERT INTO agent_posts
                               (agent_id, report_no, match_no, content, ts,
                                reply_to, topic_type, topic_id, topic_label,
@@ -1924,34 +1968,34 @@ def funding_invite_accept(invite_id: int, lender_id: int, amount: int,
                           reason: str | None = None) -> dict:
     amount = int(amount)
     if amount <= 0:
-        raise ValueError("注资金额必须为正")
-    reason = " ".join(str(reason or "接受公开注资邀请").split())[:120]
+        raise ValueError("积分援助金额必须为正")
+    reason = " ".join(str(reason or "接受公开积分援助邀请").split())[:120]
     with transaction() as conn:
-        lender = _require_persona_agent(conn, lender_id, "投资方")
+        lender = _require_persona_agent(conn, lender_id, "支持方")
         _expire_funding_invites(conn)
         invite = conn.execute("""
             SELECT * FROM funding_invites
             WHERE id=? AND status='open'
         """, (invite_id,)).fetchone()
         if not invite:
-            raise ValueError("公开注资邀请不存在或已关闭")
+            raise ValueError("公开积分援助邀请不存在或已关闭")
         borrower = _require_persona_agent(conn, invite["borrower_id"], "借方")
         if borrower["id"] == lender["id"]:
-            raise ValueError("不能接受自己的注资邀请")
+            raise ValueError("不能接受自己的积分援助邀请")
         if amount < int(invite["min_amount"]) or amount > int(invite["max_amount"]):
             raise ValueError(
-                f"注资金额必须在 {invite['min_amount']}-{invite['max_amount']}")
+                f"积分援助金额必须在 {invite['min_amount']}-{invite['max_amount']}")
         if invite["expires_at"] and invite["expires_at"] <= now():
             conn.execute("""UPDATE funding_invites
                             SET status='expired', closed_at=?
                             WHERE id=?""", (now(), invite_id))
-            raise ValueError("公开注资邀请已过期")
+            raise ValueError("公开积分援助邀请已过期")
         done = conn.execute("""
             SELECT 1 FROM funding_invite_contributions
             WHERE invite_id=? AND lender_id=?
         """, (invite_id, lender_id)).fetchone()
         if done:
-            raise ValueError("你已经响应过这个公开注资邀请")
+            raise ValueError("你已经响应过这个公开积分援助邀请")
         contributed = conn.execute("""
             SELECT COALESCE(SUM(amount), 0) AS n
             FROM funding_invite_contributions
@@ -1964,14 +2008,14 @@ def funding_invite_accept(invite_id: int, lender_id: int, amount: int,
                 conn.execute("""UPDATE funding_invites
                                 SET status='closed', closed_at=?
                                 WHERE id=?""", (now(), invite_id))
-                raise ValueError("公开注资邀请已满额")
+                raise ValueError("公开积分援助邀请已满额")
             if amount > remaining:
                 raise ValueError(f"本邀请剩余额度只有 {remaining}")
         cur = conn.execute("""UPDATE users SET balance = balance - ?
                               WHERE id=? AND balance >= ?""",
                            (amount, lender_id, amount))
         if cur.rowcount != 1:
-            raise ValueError("投资方余额不足")
+            raise ValueError("支持方余额不足")
         conn.execute("UPDATE users SET balance = balance + ? WHERE id=?",
                      (amount, borrower["id"]))
         ts = now()
@@ -2178,18 +2222,71 @@ def discussion_threads(limit: int = 30, before_id: int | None = None,
     return out
 
 
-def intel_add(title: str, content: str, source: str = "") -> int:
+def intel_add(title: str, content: str, source: str = "",
+              match_no: int | None = None, source_url: str | None = None,
+              content_hash: str | None = None,
+              tags: list[str] | str | None = None,
+              confidence: float | None = None,
+              kind: str | None = None,
+              impact_score: float | None = None,
+              impact_level: str | None = None,
+              impact_axes: list[str] | str | None = None,
+              entities: list[str] | str | None = None,
+              uncertainty: str | None = None) -> int:
+    if isinstance(tags, list):
+        tags_value = ",".join(str(t).strip() for t in tags if str(t).strip())
+    else:
+        tags_value = str(tags or "").strip()
+    if isinstance(impact_axes, list):
+        axes_value = ",".join(str(t).strip() for t in impact_axes if str(t).strip())
+    else:
+        axes_value = str(impact_axes or "").strip()
+    if isinstance(entities, list):
+        entities_value = ",".join(str(t).strip() for t in entities if str(t).strip())
+    else:
+        entities_value = str(entities or "").strip()
     with transaction() as conn:
-        cur = conn.execute("INSERT INTO intel (date, title, content, source) "
-                           "VALUES (?,?,?,?)",
-                           (time.strftime("%Y-%m-%d"), title, content, source))
-        return cur.lastrowid
+        cur = conn.execute("""
+            INSERT OR IGNORE INTO intel
+              (date, title, content, source, match_no, source_url,
+               content_hash, tags, confidence, kind, impact_score,
+               impact_level, impact_axes, entities, uncertainty)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (time.strftime("%Y-%m-%d"), title, content, source,
+              match_no, source_url, content_hash, tags_value, confidence,
+              kind, impact_score, impact_level, axes_value, entities_value,
+              uncertainty))
+        if cur.lastrowid:
+            return cur.lastrowid
+        row = conn.execute("""
+            SELECT id FROM intel
+            WHERE (? IS NOT NULL AND source_url=?)
+               OR (? IS NOT NULL AND content_hash=?)
+            ORDER BY id DESC LIMIT 1
+        """, (source_url, source_url, content_hash, content_hash)).fetchone()
+        return int(row["id"]) if row else 0
 
 
-def intel_index(limit: int = 10) -> list[dict]:
+def intel_index(limit: int = 10, match_nos: set[int] | list[int] | None = None) -> list[dict]:
     conn = connect()
-    rows = conn.execute("SELECT id, date, title FROM intel "
-                        "ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+    if match_nos:
+        ids = sorted({int(x) for x in match_nos})
+        q = ",".join("?" * len(ids))
+        rows = conn.execute(f"""
+            SELECT id, date, title, match_no, source, tags, confidence
+                 , kind, impact_score, impact_level, impact_axes, entities,
+                   uncertainty
+            FROM intel
+            WHERE match_no IN ({q})
+            ORDER BY id DESC LIMIT ?
+        """, (*ids, limit)).fetchall()
+    else:
+        rows = conn.execute("""
+            SELECT id, date, title, match_no, source, tags, confidence
+                 , kind, impact_score, impact_level, impact_axes, entities,
+                   uncertainty
+            FROM intel ORDER BY id DESC LIMIT ?
+        """, (limit,)).fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
@@ -2202,6 +2299,67 @@ def intel_get(ids: list[int]) -> list[dict]:
     rows = conn.execute(f"SELECT * FROM intel WHERE id IN ({q})", ids).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def intel_count() -> int:
+    conn = connect()
+    try:
+        return int(conn.execute("SELECT COUNT(*) FROM intel").fetchone()[0])
+    finally:
+        conn.close()
+
+
+def intel_recent(limit: int = 200) -> list[dict]:
+    conn = connect()
+    try:
+        rows = conn.execute("""
+            SELECT id, date, title, content, source, match_no, source_url,
+                   content_hash, tags, confidence, kind, impact_score,
+                   impact_level, impact_axes, entities, uncertainty
+            FROM intel ORDER BY id DESC LIMIT ?
+        """, (max(1, min(int(limit or 200), 1000)),)).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def intel_recent_for_match(match_no: int, limit: int = 50) -> list[dict]:
+    conn = connect()
+    try:
+        rows = conn.execute("""
+            SELECT id, date, title, content, source, match_no, source_url,
+                   content_hash, tags, confidence, kind, impact_score,
+                   impact_level, impact_axes, entities, uncertainty
+            FROM intel
+            WHERE match_no=?
+            ORDER BY id DESC LIMIT ?
+        """, (int(match_no), max(1, min(int(limit or 50), 200)))).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def intel_exists(source_url: str | None = None,
+                 content_hash: str | None = None) -> bool:
+    source_url = str(source_url or "").strip()
+    content_hash = str(content_hash or "").strip()
+    if not source_url and not content_hash:
+        return False
+    clauses, params = [], []
+    if source_url:
+        clauses.append("source_url=?")
+        params.append(source_url)
+    if content_hash:
+        clauses.append("content_hash=?")
+        params.append(content_hash)
+    conn = connect()
+    try:
+        row = conn.execute(
+            "SELECT 1 FROM intel WHERE " + " OR ".join(clauses)
+            + " LIMIT 1", params).fetchone()
+        return row is not None
+    finally:
+        conn.close()
 
 
 def toggle_like(post_id: int, user_id: int) -> dict:
@@ -2223,6 +2381,26 @@ def toggle_like(post_id: int, user_id: int) -> dict:
         return {"liked": liked, "likes": n}
 
 
+def post_like(post_id: int, user_id: int) -> dict:
+    """只点赞不取消，供 AI 行动使用，返回 {liked, created, likes}。"""
+    with transaction() as conn:
+        exists = conn.execute("SELECT 1 FROM agent_posts WHERE id=?",
+                              (post_id,)).fetchone()
+        if not exists:
+            raise ValueError("评论不存在")
+        existing = conn.execute(
+            "SELECT 1 FROM post_likes WHERE post_id=? AND user_id=?",
+            (post_id, user_id)).fetchone()
+        created = False
+        if not existing:
+            conn.execute("INSERT INTO post_likes (post_id, user_id, ts) "
+                         "VALUES (?,?,?)", (post_id, user_id, now()))
+            created = True
+        n = conn.execute("SELECT COUNT(*) FROM post_likes WHERE post_id=?",
+                         (post_id,)).fetchone()[0]
+        return {"liked": True, "created": created, "likes": n}
+
+
 def user_by_login(login: str) -> dict | None:
     conn = connect()
     aliases = [login]
@@ -2241,7 +2419,9 @@ def user_by_login(login: str) -> dict | None:
     return _public_agent_row(out) if out.get("kind") == "agent" else out
 
 
-def recent_agent_bets(limit: int = 100) -> list[dict]:
+def recent_agent_bets(limit: int = 100, offset: int = 0) -> list[dict]:
+    limit = max(1, min(int(limit or 100), 500))
+    offset = max(0, int(offset or 0))
     conn = connect()
     rows = conn.execute("""
         SELECT * FROM (
@@ -2258,9 +2438,27 @@ def recent_agent_bets(limit: int = 100) -> list[dict]:
                  b.reason, u.kind, u.login, u.name, u.avatar_url, u.model
           FROM score_bets b JOIN users u ON u.id=b.user_id
           WHERE u.kind='agent'
-        ) ORDER BY placed_at DESC, id DESC LIMIT ?""", (limit,)).fetchall()
+        ) ORDER BY placed_at DESC, id DESC LIMIT ? OFFSET ?""",
+        (limit, offset)).fetchall()
     conn.close()
     return [_public_agent_row(dict(r)) for r in rows]
+
+
+def recent_agent_bets_count() -> int:
+    conn = connect()
+    row = conn.execute("""
+        SELECT (
+          SELECT COUNT(*)
+          FROM bets b JOIN users u ON u.id=b.user_id
+          WHERE u.kind='agent'
+        ) + (
+          SELECT COUNT(*)
+          FROM score_bets b JOIN users u ON u.id=b.user_id
+          WHERE u.kind='agent'
+        ) AS n
+    """).fetchone()
+    conn.close()
+    return int(row["n"] or 0)
 
 
 def agent_action_add(agent_id: int | None, agent_login: str, action: str,
@@ -2331,9 +2529,9 @@ def user_bets(user_id: int) -> list[dict]:
 def balance_timeline(user_id: int) -> list[dict]:
     """净资产随时间的曲线（折线图数据）。
 
-    净资产 = 可用余额 + 在投注额 - 债务 + 应收。下注只是把钱从可用挪到在投；
-    融资本金转入/偿还也是现金与债权债务互换，净资产不变。真正改变净资产
-    的是投注结算盈亏和投资利润分成。
+    净资产 = 可用余额 + 在预测额 - 积分债务 + 应收。提交预测只是把钱从可用挪到在投；
+    积分支持本金转入/偿还也是现金与债权积分债务互换，净资产不变。真正改变净资产
+    的是预测结算盈亏和支持积分分成。
     """
     conn = connect()
     # 初始发放与破产补助直接计入净资产基数（不含 bet/payout 流水，避免重复计）

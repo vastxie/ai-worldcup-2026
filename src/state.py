@@ -19,11 +19,55 @@ from .model import (effective_elo, exact_score_prob, match_probabilities,
 from .tournament import GROUPS
 
 ROOT = Path(__file__).resolve().parent.parent
-MODEL_WEIGHT = 0.7   # 融合权重：模型 0.7 + 市场 0.3
+DEFAULT_PREDICTION_CONFIG = {
+    # 未来锁档的默认融合权重：模型 0.45 + 市场 0.55。
+    # 已赛锁档读取 DB 里的历史概率，不受这些默认值影响。
+    "model_weight": 0.45,
+    "model_weight_strong_market": 0.35,
+    "strong_market_books": 15,
+    "strong_market_disagreement": 0.08,
+    "probability_temperature": 1.25,
+    "draw_boost_max": 0.025,
+    "draw_market_min": 0.27,
+    "draw_close_margin": 0.12,
+    "draw_favorite_max": 0.50,
+    "draw_total_goals_max": 2.55,
+}
 
 
 OPEN_UPDATE_K = 0.08          # 赛中开放度学习率
 OPEN_MIN, OPEN_MAX = 0.65, 1.5
+
+
+def _prediction_config() -> dict:
+    cfg = dict(DEFAULT_PREDICTION_CONFIG)
+    try:
+        raw = json.loads((ROOT / "data" / "config.json").read_text(
+            encoding="utf-8"))
+        user_cfg = raw.get("prediction", {})
+    except (OSError, ValueError, TypeError):
+        user_cfg = {}
+    if isinstance(user_cfg, dict):
+        for key in cfg:
+            if key in user_cfg:
+                cfg[key] = user_cfg[key]
+    return cfg
+
+
+def _clamp_float(value, default: float, lo: float, hi: float) -> float:
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        out = default
+    return min(max(out, lo), hi)
+
+
+def _clamp_int(value, default: int, lo: int, hi: int) -> int:
+    try:
+        out = int(value)
+    except (TypeError, ValueError):
+        out = default
+    return min(max(out, lo), hi)
 
 
 def load_teams() -> dict[str, dict]:
@@ -73,13 +117,90 @@ def _we_from_probs(probs: dict) -> float:
     return probs["p_home"] + 0.5 * probs["p_draw"]
 
 
-def _blend_probs(model_probs: dict, market_probs: dict | None) -> dict:
+def _model_weight(model_probs: dict, market_probs: dict | None,
+                  market: dict | None, cfg: dict) -> float:
     if not market_probs:
-        return _round_probs(model_probs)
-    return _round_probs({
-        k: MODEL_WEIGHT * model_probs[k] + (1 - MODEL_WEIGHT) * market_probs[k]
+        return 1.0
+    base = _clamp_float(cfg.get("model_weight"), 0.45, 0.0, 1.0)
+    strong = _clamp_float(cfg.get("model_weight_strong_market"), 0.35, 0.0, 1.0)
+    try:
+        books = int((market or {}).get("books") or 0)
+    except (TypeError, ValueError):
+        books = 0
+    disagreement = max(
+        abs(model_probs[k] - market_probs[k])
+        for k in ("p_home", "p_draw", "p_away")
+    )
+    if (books >= _clamp_int(cfg.get("strong_market_books"), 15, 0, 200)
+            and disagreement >= _clamp_float(
+                cfg.get("strong_market_disagreement"), 0.08, 0.0, 1.0)):
+        return min(base, strong)
+    return base
+
+
+def _temperature_scale(probs: dict, temperature: float) -> dict:
+    t = _clamp_float(temperature, 1.0, 0.5, 3.0)
+    if abs(t - 1.0) < 1e-9:
+        return _normalize_probs(probs)
+    p = _normalize_probs(probs)
+    scaled = {k: p[k] ** (1.0 / t)
+              for k in ("p_home", "p_draw", "p_away")}
+    return _normalize_probs(scaled)
+
+
+def _draw_risk_boost(probs: dict, market_probs: dict | None,
+                     total_goals: float | None, cfg: dict) -> dict:
+    p = _normalize_probs(probs)
+    max_p = max(p.values())
+    draw_gap = max_p - p["p_draw"]
+    market_draw = market_probs["p_draw"] if market_probs else None
+    total_ok = total_goals is None or total_goals <= _clamp_float(
+        cfg.get("draw_total_goals_max"), 2.55, 0.8, 5.5)
+    risk = (
+        (market_draw is not None
+         and market_draw >= _clamp_float(cfg.get("draw_market_min"), 0.27, 0.0, 0.6))
+        or draw_gap <= _clamp_float(cfg.get("draw_close_margin"), 0.12, 0.0, 0.5)
+        or max_p <= _clamp_float(cfg.get("draw_favorite_max"), 0.50, 0.34, 0.8)
+    )
+    if not (risk and total_ok):
+        return p
+    boost_max = _clamp_float(cfg.get("draw_boost_max"), 0.025, 0.0, 0.08)
+    if boost_max <= 0:
+        return p
+    # Close, low-total matches get the full boost; looser matches get less.
+    closeness = max(0.0, 1.0 - draw_gap / max(
+        _clamp_float(cfg.get("draw_close_margin"), 0.12, 0.01, 0.5), 0.01))
+    boost = boost_max * max(0.45, closeness)
+    return _shift_draw(p, boost * 100.0)
+
+
+def _calibrate_probs(probs: dict, market_probs: dict | None,
+                     total_goals: float | None, cfg: dict) -> dict:
+    out = _temperature_scale(probs, cfg.get("probability_temperature", 1.25))
+    out = _draw_risk_boost(out, market_probs, total_goals, cfg)
+    return _round_probs(out)
+
+
+def _blend_probs(model_probs: dict, market_probs: dict | None,
+                 market: dict | None, total_goals: float | None,
+                 cfg: dict) -> tuple[dict, float]:
+    if not market_probs:
+        probs = _calibrate_probs(model_probs, None, total_goals, cfg)
+        return probs, 1.0
+    weight = _model_weight(model_probs, market_probs, market, cfg)
+    blended = _normalize_probs({
+        k: weight * model_probs[k] + (1 - weight) * market_probs[k]
         for k in ("p_home", "p_draw", "p_away")
     })
+    return _calibrate_probs(blended, market_probs, total_goals, cfg), weight
+
+
+def _blend_total_goals(model_total: float, market: dict | None,
+                       weight: float) -> float:
+    if market and market.get("total_goals") is not None:
+        return round(weight * model_total
+                     + (1 - weight) * market["total_goals"], 3)
+    return round(model_total, 3)
 
 
 def _shift_home_edge(probs: dict, delta_pp: float) -> dict:
@@ -251,10 +372,11 @@ def build_state(write_side_effects: bool = True) -> dict:
             t["open"] = min(max(t.get("open", 1.0) * ratio ** OPEN_UPDATE_K,
                                 OPEN_MIN), OPEN_MAX)
 
-    # ---- 市场赔率融合：为未赛对阵生成/刷新锁定预测 ----
+    # ---- 市场回报系数融合：为未赛对阵生成/刷新锁定预测 ----
     from datetime import datetime, timezone
     now_utc = datetime.now(timezone.utc)
     odds_cache = odds.load() or {}
+    pred_cfg = _prediction_config()
     fable_adj = db.fable_adjusts()
     h2h = odds_cache.get("h2h", {})
     we_overrides = {}
@@ -264,7 +386,7 @@ def build_state(write_side_effects: bool = True) -> dict:
         kickoff = datetime.fromisoformat(
             m["date_utc"].replace(" ", "T")).astimezone(timezone.utc)
         if kickoff <= now_utc:
-            # 已开球但比分未入库：滚球/赛后盘口严禁覆盖赛前锁档
+            # 已开球但比分未入库：滚球/赛后市场参考严禁覆盖赛前锁档
             lk = locked.get(str(m["match"]))
             if lk:
                 we_overrides[(m["home"], m["away"])] = lock_prediction_override(lk)
@@ -279,16 +401,16 @@ def build_state(write_side_effects: bool = True) -> dict:
             model_total = sum(pred_model["lambdas"])
             adj_probs, adj_total = _apply_adjust(model_probs, model_total, fa)
             mkt_probs = _market_probs(mkt)
-            probs_blend = _blend_probs(adj_probs, mkt_probs)
-            probs_base = _blend_probs(_round_probs(model_probs), mkt_probs)
-            if mkt and mkt.get("total_goals") is not None:
-                total_blend = round(MODEL_WEIGHT * adj_total
-                                    + (1 - MODEL_WEIGHT) * mkt["total_goals"], 3)
-                total_base = round(MODEL_WEIGHT * round(model_total, 3)
-                                   + (1 - MODEL_WEIGHT) * mkt["total_goals"], 3)
-            else:
-                total_blend = adj_total
-                total_base = round(model_total, 3)
+            blend_weight = _model_weight(adj_probs, mkt_probs, mkt, pred_cfg)
+            base_weight = _model_weight(_round_probs(model_probs), mkt_probs,
+                                        mkt, pred_cfg)
+            total_blend = _blend_total_goals(adj_total, mkt, blend_weight)
+            total_base = _blend_total_goals(round(model_total, 3), mkt,
+                                            base_weight)
+            probs_blend, blend_weight = _blend_probs(
+                adj_probs, mkt_probs, mkt, total_blend, pred_cfg)
+            probs_base, base_weight = _blend_probs(
+                _round_probs(model_probs), mkt_probs, mkt, total_base, pred_cfg)
             we_blend = round(_we_from_probs(probs_blend), 4)
             we_base = round(_we_from_probs(probs_base), 4)
             fable = ({"delta": fa.get("delta", 0), "draw": fa.get("draw", 0),
@@ -298,6 +420,8 @@ def build_state(write_side_effects: bool = True) -> dict:
                 "we": we_blend, "we_base": we_base, "market": mkt,
                 "probs": probs_blend, "probs_base": probs_base,
                 "total_goals": total_blend, "total_goals_base": total_base,
+                "model_weight": round(blend_weight, 3),
+                "model_weight_base": round(base_weight, 3),
                 "fable": fable, "ts": time.strftime("%Y-%m-%d %H:%M"),
             }
             if write_side_effects:

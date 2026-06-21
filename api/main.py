@@ -7,7 +7,7 @@ nginx 把 /api/ 反代到本服务；静态站照旧由 nginx 直接服务。
 - 会话 = HMAC 签名 cookie（HttpOnly/Secure/SameSite=Lax），无服务端会话存储
 - 写接口校验 Origin + 限频（IP 维度）
 - 预测守卫：开球即锁定（沿用赛中数据事故的教训），回报系数提交瞬间快照
-- 积分为虚拟娱乐积分，不可兑现
+- 积分为站内虚拟积分
 """
 
 from __future__ import annotations
@@ -60,9 +60,22 @@ def _origin_list(value) -> list[str]:
     return [str(x).strip().rstrip("/") for x in value if str(x).strip()]
 
 
+def _url_origin(url: str | None) -> str | None:
+    if not url:
+        return None
+    parsed = urllib.parse.urlparse(str(url))
+    if not parsed.scheme or not parsed.netloc:
+        return None
+    return f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+
+
+def _request_host(request: Request) -> str:
+    return (request.headers.get("host") or "").split(",", 1)[0].strip().lower()
+
+
 CONFIG = _load_config()
 SITE = (_env_first("WORLDCUP_SITE_URL", "SITE_URL")
-        or CONFIG.get("site_url") or "https://worldcup.lightai.io").rstrip("/")
+        or CONFIG.get("site_url") or "https://wc.lightai.io").rstrip("/")
 
 OAUTH = dict(CONFIG.get("github_oauth", {}))
 for env, key in (("GITHUB_CLIENT_ID", "client_id"),
@@ -83,7 +96,8 @@ MIN_STAKE, MAX_STAKE = 10, 100000
 ODDS_CAP_P = 0.02          # 概率下限 → 回报系数上限 50x
 SCORE_MIN_STAKE, SCORE_MAX_STAKE = 10, 50
 SCORE_MAX_GOALS = 6
-SCORE_ODDS_CAP_P = 1 / 80  # 比分预测回报系数上限 80x
+SCORE_BOOK_MARGIN = 0.10
+SCORE_MAX_COEFFICIENT = 80.0
 
 app = FastAPI(title="worldcup-arena", docs_url=None, redoc_url=None)
 db.init_db()
@@ -193,7 +207,12 @@ def current_odds() -> dict:
                         prob = exact_score_prob(home, away, gh, ga,
                                                 we_override=p)
                         score_probs[key] = round(prob, 5)
-                        score_odds[key] = round(1 / max(prob, SCORE_ODDS_CAP_P), 2)
+                        if prob > 0:
+                            score_odds[key] = round(
+                                min(SCORE_MAX_COEFFICIENT,
+                                    1 / (prob * (1 + SCORE_BOOK_MARGIN))),
+                                2,
+                            )
             table[m["match"]] = {
                 "date_utc": m["date_utc"],
                 "home": m["home"], "away": m["away"],
@@ -253,8 +272,13 @@ def health():
 
 
 @app.get("/api/auth/login")
-def auth_login():
+def auth_login(request: Request):
     oauth = require_oauth_config()
+    callback_origin = _url_origin(oauth.get("callback_url"))
+    callback_host = urllib.parse.urlparse(callback_origin or "").netloc.lower()
+    request_host = _request_host(request)
+    if callback_origin and callback_host and request_host and request_host != callback_host:
+        return RedirectResponse(callback_origin + "/api/auth/login")
     state_payload = json.dumps({"n": secrets.token_hex(8),
                                 "exp": time.time() + 600}).encode()
     state = _sign(state_payload)
@@ -488,8 +512,11 @@ def match_posts(match_no: int):
 
 
 @app.get("/api/leaderboard")
-def get_leaderboard():
-    return db.leaderboard(100)
+def get_leaderboard(request: Request):
+    rows = db.leaderboard(100)
+    if not session_user(request):
+        rows = [r for r in rows if r["kind"] == "agent"]
+    return rows
 
 
 @app.get("/api/timeline/{user_id}")

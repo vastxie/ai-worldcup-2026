@@ -1,36 +1,29 @@
-"""自研统一模型网关：多协议适配、超时重试、用量记账。纯标准库。
+"""统一模型网关客户端：项目只调用 OpenAI-compatible Chat Completions。
+
+模型协议、账号和供应商差异交给 pi-serve 处理；本项目只保留逻辑模型 id、
+真实 pi model id、超时重试和用量记账。
 
 配置在 data/config.json（gitignored，密钥绝不入库）：
   "gateway": {
+    "base_url": "http://127.0.0.1:8787/v1",
+    "api_key": "...",
     "models": [
-      {"id": "claude",  "label": "Claude",  "protocol": "anthropic",
-       "base_url": "https://api.anthropic.com", "api_key": "...",
-       "model": "claude-sonnet-4-6"},
-      {"id": "gpt",     "label": "GPT",     "protocol": "openai",
-       "base_url": "https://api.openai.com/v1", "api_key": "...",
-       "model": "gpt-5.2"},
-      {"id": "gemini",  "label": "Gemini",  "protocol": "gemini",
-       "base_url": "https://generativelanguage.googleapis.com",
-       "api_key": "...", "model": "gemini-3-flash"}
+      {"id": "glm", "label": "GLM", "model": "zai-coding-cn/glm-5.2"},
+      {"id": "doubao", "label": "豆包", "model": "volcengine/doubao-..."}
     ]
   }
-
-协议适配（参考 99Agent modelGateway 的 adapter 划分）：
-  openai    → POST {base}/chat/completions
-  anthropic → POST {base}/v1/messages
-  gemini    → POST {base}/v1beta/models/{model}:generateContent
-  mock      → 离线测试用，返回 canned 文本
 
 用法：
   from src.gateway import Gateway
   gw = Gateway()
-  out = gw.chat("claude", system="...", user="...", agent="claude-bettor")
+  out = gw.chat("glm", system="...", user="...", agent="glm-bettor")
   out -> {"text": str, "prompt_tokens": int, "completion_tokens": int}
 """
 
 from __future__ import annotations
 
 import json
+import os
 import time
 import urllib.error
 import urllib.request
@@ -39,9 +32,13 @@ from pathlib import Path
 from . import db
 
 ROOT = Path(__file__).resolve().parent.parent
-TIMEOUT = 600  # 单次调用 10 分钟上限，输出 token 不设限
+TIMEOUT = int(os.getenv("AIWC_GATEWAY_TIMEOUT")
+              or os.getenv("GATEWAY_TIMEOUT") or "600")
 RETRIES = 2
-ANTHROPIC_MAX_TOKENS = 32000  # anthropic 协议必填字段的兜底值，可被 cfg.max_tokens 覆盖
+
+
+def _config_path() -> Path:
+    return Path(os.getenv("WORLDCUP_CONFIG", ROOT / "data" / "config.json"))
 
 
 def _post(url: str, headers: dict, body: dict) -> dict:
@@ -52,109 +49,67 @@ def _post(url: str, headers: dict, body: dict) -> dict:
         return json.loads(resp.read().decode("utf-8"))
 
 
-# ------------------------------------------------------------- 协议适配器 --
+def _auth_headers(api_key: str | None) -> dict:
+    if not api_key:
+        return {}
+    return {"Authorization": f"Bearer {api_key}"}
 
-def _call_openai(cfg: dict, system: str, user: str, max_tokens: int | None,
-                 temperature: float) -> dict:
-    body = {"model": cfg["model"],
-            "messages": [{"role": "system", "content": system},
-                         {"role": "user", "content": user}]}
-    if not cfg.get("no_temperature"):  # 新模型（如 opus-4-8）废弃了 temperature
+
+def _chat_completion(gateway_cfg: dict, model_cfg: dict, system: str, user: str,
+                     max_tokens: int | None, temperature: float) -> dict:
+    body = {
+        "model": model_cfg["model"],
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+    }
+    if not model_cfg.get("no_temperature"):
         body["temperature"] = temperature
-    mt = max_tokens or cfg.get("max_tokens")  # 必填 max_tokens 的模型在 config 兜底
+    mt = max_tokens or model_cfg.get("max_tokens") or gateway_cfg.get("max_tokens")
     if mt:
         body["max_tokens"] = mt
-    body.update(cfg.get("extra") or {})  # 如 reasoning_effort 等模型特有参数
-    out = _post(cfg["base_url"].rstrip("/") + "/chat/completions",
-                {"Authorization": f"Bearer {cfg['api_key']}"}, body)
+    body.update(gateway_cfg.get("extra") or {})
+    body.update(model_cfg.get("extra") or {})
+
+    out = _post(
+        gateway_cfg["base_url"].rstrip("/") + "/chat/completions",
+        _auth_headers(gateway_cfg.get("api_key")),
+        body,
+    )
     usage = out.get("usage") or {}
-    return {"text": out["choices"][0]["message"]["content"] or "",
-            "prompt_tokens": usage.get("prompt_tokens", 0),
-            "completion_tokens": usage.get("completion_tokens", 0)}
+    message = (out.get("choices") or [{}])[0].get("message") or {}
+    return {
+        "text": message.get("content") or "",
+        "prompt_tokens": usage.get("prompt_tokens", 0),
+        "completion_tokens": usage.get("completion_tokens", 0),
+    }
 
-
-def _call_anthropic(cfg: dict, system: str, user: str, max_tokens: int | None,
-                    temperature: float) -> dict:
-    out = _post(cfg["base_url"].rstrip("/") + "/v1/messages",
-                {"x-api-key": cfg["api_key"],
-                 "anthropic-version": "2023-06-01"},
-                {"model": cfg["model"], "system": system,
-                 "messages": [{"role": "user", "content": user}],
-                 "max_tokens": max_tokens or cfg.get("max_tokens",
-                                                     ANTHROPIC_MAX_TOKENS),
-                 "temperature": temperature})
-    text = "".join(b.get("text", "") for b in out.get("content", [])
-                   if b.get("type") == "text")
-    usage = out.get("usage") or {}
-    return {"text": text,
-            "prompt_tokens": usage.get("input_tokens", 0),
-            "completion_tokens": usage.get("output_tokens", 0)}
-
-
-def _call_gemini(cfg: dict, system: str, user: str, max_tokens: int | None,
-                 temperature: float) -> dict:
-    url = (cfg["base_url"].rstrip("/")
-           + f"/v1beta/models/{cfg['model']}:generateContent"
-           + f"?key={cfg['api_key']}")
-    gen_cfg: dict = {"temperature": temperature}
-    if max_tokens:
-        gen_cfg["maxOutputTokens"] = max_tokens
-    out = _post(url, {}, {
-        "systemInstruction": {"parts": [{"text": system}]},
-        "contents": [{"role": "user", "parts": [{"text": user}]}],
-        "generationConfig": gen_cfg})
-    cand = (out.get("candidates") or [{}])[0]
-    text = "".join(p.get("text", "")
-                   for p in cand.get("content", {}).get("parts", []))
-    usage = out.get("usageMetadata") or {}
-    return {"text": text,
-            "prompt_tokens": usage.get("promptTokenCount", 0),
-            "completion_tokens": usage.get("candidatesTokenCount", 0)}
-
-
-def _call_openai_responses(cfg: dict, system: str, user: str,
-                           max_tokens: int | None,
-                           temperature: float) -> dict:
-    """OpenAI Responses 协议（豆包 Ark v3 等，参考 99Agent doubao_responses）。"""
-    url = cfg["base_url"].rstrip("/")
-    if not url.endswith("/responses"):
-        url += "/responses"
-    body = {"model": cfg["model"],
-            "input": [{"role": "system", "content": system},
-                      {"role": "user", "content": user}]}
-    if max_tokens:
-        body["max_output_tokens"] = max_tokens
-    body.update(cfg.get("extra") or {})
-    out = _post(url, {"Authorization": f"Bearer {cfg['api_key']}"}, body)
-    text = ""
-    for item in out.get("output", []):
-        if item.get("type") == "message":
-            for c in item.get("content", []):
-                if c.get("type") in ("output_text", "text"):
-                    text += c.get("text", "")
-    usage = out.get("usage") or {}
-    return {"text": text,
-            "prompt_tokens": usage.get("input_tokens", 0),
-            "completion_tokens": usage.get("output_tokens", 0)}
-
-
-def _call_mock(cfg: dict, system: str, user: str, max_tokens: int | None,
-               temperature: float) -> dict:
-    return {"text": cfg.get("mock_response", "{}"),
-            "prompt_tokens": len(system + user) // 4, "completion_tokens": 50}
-
-
-ADAPTERS = {"openai": _call_openai, "anthropic": _call_anthropic,
-            "gemini": _call_gemini, "openai_responses": _call_openai_responses,
-            "mock": _call_mock}
-
-
-# ----------------------------------------------------------------- 网关类 --
 
 class Gateway:
     def __init__(self):
-        cfg = json.loads((ROOT / "data" / "config.json").read_text(encoding="utf-8"))
-        self.models = {m["id"]: m for m in cfg.get("gateway", {}).get("models", [])}
+        cfg = json.loads(_config_path().read_text(encoding="utf-8"))
+        gateway_cfg = dict(cfg.get("gateway") or {})
+        if os.getenv("AIWC_GATEWAY_BASE_URL") or os.getenv("GATEWAY_BASE_URL"):
+            gateway_cfg["base_url"] = (
+                os.getenv("AIWC_GATEWAY_BASE_URL")
+                or os.getenv("GATEWAY_BASE_URL")
+            )
+        if os.getenv("AIWC_GATEWAY_API_KEY") or os.getenv("GATEWAY_API_KEY"):
+            gateway_cfg["api_key"] = (
+                os.getenv("AIWC_GATEWAY_API_KEY")
+                or os.getenv("GATEWAY_API_KEY")
+            )
+
+        if not gateway_cfg.get("base_url"):
+            raise RuntimeError("缺少 gateway.base_url，请指向 pi-serve 的 /v1 地址")
+
+        self.gateway_cfg = gateway_cfg
+        self.models = {
+            m["id"]: m
+            for m in gateway_cfg.get("models", [])
+            if m.get("id") and m.get("model")
+        }
 
     def available(self) -> list[dict]:
         return [{"id": m["id"], "label": m.get("label", m["id"]),
@@ -167,21 +122,19 @@ class Gateway:
         cfg = self.models.get(model_id)
         if not cfg:
             raise KeyError(f"网关未配置模型: {model_id}")
-        adapter = ADAPTERS.get(cfg.get("protocol", "openai"))
-        if not adapter:
-            raise KeyError(f"未知协议: {cfg.get('protocol')}")
 
         last_err = None
         for attempt in range(RETRIES + 1):
             t0 = time.time()
             try:
-                out = adapter(cfg, system, user, max_tokens, temperature)
+                out = _chat_completion(
+                    self.gateway_cfg, cfg, system, user, max_tokens, temperature)
                 self._log(agent, cfg, out, ok=1,
                           note=f"{time.time() - t0:.1f}s")
                 return out
             except (urllib.error.URLError, urllib.error.HTTPError,
                     TimeoutError, json.JSONDecodeError, KeyError,
-                    OSError) as exc:
+                    IndexError, OSError) as exc:
                 last_err = exc
                 detail = ""
                 if isinstance(exc, urllib.error.HTTPError):

@@ -3,7 +3,7 @@
 两类讨论：
 - 战报圆桌（run_session）：嘉宾评论最近几期战报，综合话题、跨场对线，主舞台；
 - 单场讨论（run_match_session）：嘉宾针对某一场比赛喊话/复盘，挂在该场评论区，
-  赛前立 flag、赛后清算，和投注强绑定。
+  赛前立 flag、赛后清算，和预测强绑定。
 
 机制：随机若干发言机会，每次随机抽一位娱乐组选手；被抽中者看到上下文后，
 可选择发新评论 / 回复任意一条（含楼中楼）/ 点赞 / 弃权；同一人可被多次抽中；
@@ -13,7 +13,7 @@
   python3 -m src.discuss                # 战报圆桌（随机 5~15 轮）
   python3 -m src.discuss --rounds 8     # 战报圆桌，指定轮数
   python3 -m src.discuss --match 4      # 第 4 场单场讨论
-  python3 -m src.discuss --soon         # 给所有临近开赛/刚结束且有 AI 投注的场各开一轮
+  python3 -m src.discuss --soon         # 给所有临近开赛/刚结束且有 AI 预测的场各开一轮
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ SYSTEM_DISCUSS = """你是「{name}」，2026 世界杯 AI 竞技场圆桌讨论
 
 现在轮到你的发言机会。你会看到最近几期战报（含期数）、情报区最新索引（仅标题，
 聊到相关话题可引用）、当前完整评论区（树状，含每条的 id、作者、所属战报、
-点赞数、回复关系）、你自己的投注与私有笔记。
+点赞数、回复关系）、你自己的预测与私有笔记。
 
 只输出一个 JSON 对象（不要其他文字、不要代码块）：
 {{
@@ -56,8 +56,8 @@ SYSTEM_MATCH = """你是「{name}」，2026 世界杯 AI 竞技场圆桌讨论�
 请始终保持人设的语气和立场。
 
 现在大家在专门聊这一场比赛：{matchup}。
-你会看到这场的对阵、AI 概率、赔率、市场盘口、Codex 微调、看点、是否已赛及比分，
-本场已有的评论（树状），你自己在这场的投注（含你当时写的理由）与私有笔记。
+你会看到这场的对阵、AI 概率、回报系数、市场市场参考、Codex 微调、看点、是否已赛及比分，
+本场已有的评论（树状），你自己在这场的预测（含你当时写的理由）与私有笔记。
 根据这些公开信息自己判断该说什么。
 
 只输出一个 JSON 对象（不要其他文字、不要代码块）：
@@ -126,8 +126,8 @@ def _match_info(match_no: int, data: dict) -> dict | None:
         "比分": m.get("score"),
         "AI概率": ({"主胜H": p["p_home"], "平D": p["p_draw"], "客胜A": p["p_away"]}
                   if p else None),
-        "赔率": odds,
-        "市场盘口": p.get("market"),
+        "回报系数": odds,
+        "市场市场参考": p.get("market"),
         "Codex微调": (advisor_note(p["fable"]) if p.get("fable") else None),
         "看点": blurb["text"] if blurb else None,
         "本场相关情报": related,
@@ -135,7 +135,7 @@ def _match_info(match_no: int, data: dict) -> dict | None:
 
 
 def _focus_matches(data: dict) -> list[int]:
-    """值得开讨论的比赛：未来 30h 内即将开赛，或过去 12h 内刚结束，且有 AI 投注。"""
+    """值得开讨论的比赛：未来 30h 内即将开赛，或过去 12h 内刚结束，且有 AI 预测。"""
     now = datetime.now(timezone.utc)
     out = []
     for m in data["schedule"]:
@@ -206,9 +206,9 @@ def speak(agent_cfg: dict, gw: Gateway, reports: list[dict],
         "情报区最新索引": [{"id": it["id"], "日期": it["date"], "标题": it["title"]}
                           for it in db.intel_index(10)],
         "当前评论区": tree,
-        "你的近期投注": [
-            {"场次": b["match_no"], "方向": b["pick"], "注额": b["stake"],
-             "已结": bool(b["settled"]), "派彩": b["payout"]}
+        "你的近期预测": [
+            {"场次": b["match_no"], "方向": b["pick"], "投入积分": b["stake"],
+             "已结": bool(b["settled"]), "结算得分": b["payout"]}
             for b in db.user_bets(me["id"])[:8]],
         "你的私有笔记": db.agent_notes_list(me["id"]),
     }, ensure_ascii=False)
@@ -312,10 +312,10 @@ def speak_match(agent_cfg: dict, gw: Gateway, info: dict,
     user_msg = json.dumps({
         "这场比赛": info,
         "本场评论区": tree,
-        "你在这场的投注": [
-            {"方向": b["pick"], "注额": b["stake"], "赔率": b["odds"],
+        "你在这场的预测": [
+            {"方向": b["pick"], "投入积分": b["stake"], "回报系数": b["odds"],
              "理由": b.get("reason"), "已结": bool(b["settled"]),
-             "派彩": b["payout"]} for b in my_bet],
+             "结算得分": b["payout"]} for b in my_bet],
         "情报区最新索引": [{"id": it["id"], "标题": it["title"]}
                           for it in db.intel_index(8)],
         "你的私有笔记": db.agent_notes_list(me["id"]),
@@ -359,7 +359,7 @@ def main() -> None:
                         help="发言机会数（战报圆桌默认随机 5~15，单场默认 3~6）")
     parser.add_argument("--match", type=int, default=None, help="只讨论某一场")
     parser.add_argument("--soon", action="store_true",
-                        help="给所有临近开赛/刚结束且有 AI 投注的场各开一轮")
+                        help="给所有临近开赛/刚结束且有 AI 预测的场各开一轮")
     args = parser.parse_args()
     if args.match:
         run_match_session(args.match, args.rounds)
@@ -368,7 +368,7 @@ def main() -> None:
         data = _load_results()
         focus = _focus_matches(data) if data else []
         if not focus:
-            print("  [discuss] 暂无临近且有投注的比赛")
+            print("  [discuss] 暂无临近且有预测的比赛")
             return
         print(f"  [discuss] 焦点场 {focus}，逐场开席")
         for mn in focus:

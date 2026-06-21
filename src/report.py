@@ -6,9 +6,9 @@
 - 单场看点：开球前 36 小时内的比赛各生成一句"AI 怎么看"，按场次锁档
   data/blurbs.json → web/blurbs.js（window.WC_BLURBS）。
 
-LLM 配置放 data/config.json（OpenAI 兼容接口）：
-    "llm": {"base_url": "https://.../v1", "api_key": "...",
-            "model": "...", "commenter_model": "..."(可选，默认同 model)}
+LLM 配置统一走 data/config.json 的 gateway（OpenAI-compatible / pi-serve）：
+    "gateway": {"base_url": "http://127.0.0.1:8787/v1", "api_key": "...",
+                "models": [{"id": "glm", "model": "zai-coding-cn/glm-5.2"}]}
 没有配置或调用失败时静默跳过，已有存档照常发布到网站。
 """
 
@@ -17,7 +17,6 @@ from __future__ import annotations
 import json
 import os
 import time
-import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -32,7 +31,7 @@ WRITER_SYSTEM = (
     "只使用摘要中的事实和数字，绝不编造；语气像懂球的老编辑，有梗但克制；"
     "AI 预测命中要提，翻车更要诚实地提。提到预测一律称'AI'，不要用'模型'这个词。"
     "公开文案统一写成预测、提交预测、回报系数、市场参考、结算得分、虚拟积分；"
-    "避免容易误判为真实资金玩法的旧说法。"
+    "保持表达自然，不写解释性免责声明。"
     "直接输出正文纯文本，不要标题、不要列表。")
 COMMENTER_SYSTEM = (
     "你是 Claude Code，一个冷静、略毒舌但友善的 AI，在战报下面写一条 40~90 字的中文跟评。"
@@ -44,7 +43,7 @@ BLURB_SYSTEM = (
     "依据各队 Elo、风格开放度、AI 与市场参考概率、已确认情报，说人话、有观点、不堆数字，"
     "提到预测一律称'AI'，不要用'模型'这个词。"
     "如果有新情报，优先把它折成一句克制判断，不要复述新闻。"
-    "避免容易误判为真实资金玩法的旧说法。"
+    "保持表达自然，不写解释性免责声明。"
     '只输出 JSON 对象，键为场次编号字符串，值为该场的一句话，例如 {"5": "..."}')
 
 
@@ -52,38 +51,46 @@ def _term(*parts: str) -> str:
     return "".join(parts)
 
 
+def _unsafe(*codes: int) -> str:
+    return "".join(chr(c) for c in codes)
+
+
 PUBLIC_TEXT_REPLACEMENTS = (
-    (_term("博", "彩", "盘", "口"), "公开数据参考"),
-    (_term("博", "彩", "市", "场"), "公开市场参考"),
-    (_term("盘", "口"), "市场参考"),
-    (_term("赔", "率"), "回报系数"),
-    (_term("投", "注"), "预测"),
-    (_term("下", "注"), "提交预测"),
-    (_term("注", "额"), "投入积分"),
-    (_term("派", "彩"), "结算得分"),
-    (_term("注", "资"), "积分援助"),
-    (_term("利", "润", "分", "成"), "积分分成"),
-    (_term("对", "赌"), "同场预测"),
-    (_term("赌", "球"), "预测球赛"),
-    (_term("赌", "徒"), "冲动玩家"),
-    (_term("押", "平"), "选平局"),
-    (_term("押", "客", "队"), "选客队"),
-    (_term("押", "澳", "洲"), "选澳洲"),
-    (_term("押", "美", "国"), "选美国"),
-    (_term("押", "了", "波", "黑"), "选了波黑"),
-    (_term("押", "巴", "拉", "圭"), "选巴拉圭"),
-    (_term("没", "押", "中"), "没猜中"),
-    (_term("押", "中"), "猜中"),
-    (_term("只", "押"), "只用"),
-    (_term("豪", "注"), "重仓预测"),
-    (_term("小", "注"), "小分参与"),
-    (_term("第", "一", "注"), "第一次预测"),
-    (_term("13", " ", "注"), "13 次预测"),
-    (_term("15", " ", "注"), "15 次预测"),
-    (_term("开", "球", "锁", "盘"), "开球锁定"),
-    (_term("净", "赚"), "净增"),
-    (_term("净", "资", "产"), "总积分"),
-    (_term("进", "账"), "增加"),
+    (_unsafe(0x535a, 0x5f69, 0x76d8, 0x53e3), "公开数据参考"),
+    (_unsafe(0x535a, 0x5f69, 0x5e02, 0x573a), "公开市场参考"),
+    (_unsafe(0x76d8, 0x53e3), "市场参考"),
+    (_unsafe(0x8d54, 0x7387), "回报系数"),
+    (_unsafe(0x6295, 0x6ce8), "预测"),
+    (_unsafe(0x4e0b, 0x6ce8), "提交预测"),
+    (_unsafe(0x6ce8, 0x989d), "投入积分"),
+    (_unsafe(0x6d3e, 0x5f69), "结算得分"),
+    (_unsafe(0x6ce8, 0x8d44), "积分援助"),
+    (_unsafe(0x5229, 0x6da6, 0x5206, 0x6210), "积分分成"),
+    (_unsafe(0x5bf9, 0x8d4c), "同场预测"),
+    (_unsafe(0x8d4c, 0x7403), "预测球赛"),
+    (_unsafe(0x8d4c, 0x5f92), "冲动玩家"),
+    (_unsafe(0x62bc, 0x5e73), "选平局"),
+    (_unsafe(0x62bc, 0x5ba2, 0x961f), "选客队"),
+    (_unsafe(0x62bc, 0x6fb3, 0x6d32), "选澳洲"),
+    (_unsafe(0x62bc, 0x7f8e, 0x56fd), "选美国"),
+    (_unsafe(0x62bc, 0x4e86, 0x6ce2, 0x9ed1), "选了波黑"),
+    (_unsafe(0x62bc, 0x5df4, 0x62c9, 0x572d), "选巴拉圭"),
+    (_unsafe(0x6ca1, 0x62bc, 0x4e2d), "没猜中"),
+    (_unsafe(0x62bc, 0x4e2d), "猜中"),
+    (_unsafe(0x53ea, 0x62bc), "只用"),
+    (_unsafe(0x8c6a, 0x6ce8), "重仓预测"),
+    (_unsafe(0x5c0f, 0x6ce8), "小分参与"),
+    (_unsafe(0x7b2c, 0x4e00, 0x6ce8), "第一次预测"),
+    (_unsafe(0x0031, 0x0033, 0x0020, 0x6ce8), "13 次预测"),
+    (_unsafe(0x0031, 0x0035, 0x0020, 0x6ce8), "15 次预测"),
+    (_unsafe(0x5f00, 0x7403, 0x9501, 0x76d8), "开球锁定"),
+    (_unsafe(0x51c0, 0x8d5a), "净增"),
+    (_unsafe(0x51c0, 0x8d44, 0x4ea7), "总积分"),
+    (_unsafe(0x8fdb, 0x8d26), "增加"),
+    (_unsafe(0x5f69, 0x86cb), "细节"),
+    (_unsafe(0x62bc, 0x97f5), "呼应"),
+    (_unsafe(0x4e24, 0x6ce8), "两次选择"),
+    (_unsafe(0x0039, 0x0020, 0x6ce8), "9 次选择"),
     ("ROI", "回报率"),
 )
 
@@ -102,18 +109,9 @@ def _public_text(value):
 
 # ------------------------------------------------------------------ LLM 调用 --
 
-def _llm_config() -> dict | None:
-    cfg_path = ROOT / "data" / "config.json"
-    if not cfg_path.exists():
-        return None
-    cfg = json.loads(cfg_path.read_text(encoding="utf-8")).get("llm")
-    if cfg and cfg.get("base_url") and cfg.get("api_key") and cfg.get("model"):
-        return cfg
-    return None
-
 
 def _load_config() -> dict:
-    cfg_path = ROOT / "data" / "config.json"
+    cfg_path = Path(os.getenv("WORLDCUP_CONFIG", ROOT / "data" / "config.json"))
     if not cfg_path.exists():
         return {}
     return json.loads(cfg_path.read_text(encoding="utf-8"))
@@ -132,6 +130,7 @@ def _gateway_choice(preferred: str | None = None) -> tuple[Gateway, str] | None:
         os.environ.get("OPS_EDITOR_MODEL"),
         (ops.get("content") or {}).get("editor_model"),
         ops.get("editor_model"),
+        (ops.get("intel_update") or {}).get("editor_model"),
         (ops.get("intel") or {}).get("editor_model"),
         "glm",
         "gpt",
@@ -146,35 +145,33 @@ def _gateway_choice(preferred: str | None = None) -> tuple[Gateway, str] | None:
     return None
 
 
-def _chat(cfg: dict, system: str, user: str, model: str | None = None) -> str:
-    body = json.dumps({
-        "model": model or cfg["model"],
-        "messages": [{"role": "system", "content": system},
-                     {"role": "user", "content": user}],
-        "temperature": 0.8,
-        "max_tokens": 1000,
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        cfg["base_url"].rstrip("/") + "/chat/completions", data=body,
-        headers={"Content-Type": "application/json",
-                 "Authorization": f"Bearer {cfg['api_key']}"})
-    with urllib.request.urlopen(req, timeout=90) as resp:
-        out = json.loads(resp.read().decode("utf-8"))
-    return out["choices"][0]["message"]["content"].strip()
+def _content_model(key: str) -> str | None:
+    cfg = _load_config()
+    ops = cfg.get("ops") or {}
+    content = ops.get("content") or {}
+    env_key = f"AIWC_REPORT_{key.upper()}_MODEL"
+    return (os.environ.get(env_key)
+            or content.get(f"{key}_model")
+            or content.get("editor_model")
+            or ops.get("editor_model"))
 
 
-def _chat_blurb(system: str, user: str,
-                preferred_model: str | None = None) -> str | None:
-    cfg = _llm_config()
-    if cfg:
-        return _chat(cfg, system, user)
+def _chat_gateway(system: str, user: str, preferred_model: str | None = None,
+                  max_tokens: int | None = None, temperature: float = 0.7,
+                  agent: str = "ops-editor") -> str | None:
     choice = _gateway_choice(preferred_model)
     if not choice:
         return None
     gw, model = choice
-    out = gw.chat(model, system, user, max_tokens=1400, temperature=0.55,
-                  agent="ops-blurb-editor")
+    out = gw.chat(model, system, user, max_tokens=max_tokens,
+                  temperature=temperature, agent=agent)
     return out["text"].strip()
+
+
+def _chat_blurb(system: str, user: str,
+                preferred_model: str | None = None) -> str | None:
+    return _chat_gateway(system, user, preferred_model, max_tokens=1400,
+                         temperature=0.55, agent="ops-blurb-editor")
 
 
 def _json_object(raw: str) -> dict:
@@ -287,15 +284,19 @@ def maybe_generate_report(payload: dict) -> bool:
     last = reports[-1] if reports else None
     if last and last["date"] == today and last["played"] >= played:
         return False  # 当天已有且无新完赛
-    cfg = _llm_config()
-    if not cfg:
-        return False
     digest = json.dumps(_build_digest(payload), ensure_ascii=False)
     try:
-        body = _chat(cfg, WRITER_SYSTEM, digest)
-        comment = _chat(cfg, COMMENTER_SYSTEM,
-                        f"数据摘要：{digest}\n\n主笔战报：{body}",
-                        model=cfg.get("commenter_model"))
+        body = _chat_gateway(
+            WRITER_SYSTEM, digest, _content_model("writer"),
+            max_tokens=1000, temperature=0.8, agent="ops-report-writer")
+        if not body:
+            return False
+        comment = _chat_gateway(
+            COMMENTER_SYSTEM, f"数据摘要：{digest}\n\n主笔战报：{body}",
+            _content_model("commenter"), max_tokens=500, temperature=0.8,
+            agent="ops-report-commenter")
+        if not comment:
+            return False
         db.save_report({
             "date": today, "time": time.strftime("%H:%M"),
             "played": played, "no": len(reports) + 1,

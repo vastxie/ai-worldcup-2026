@@ -9,10 +9,15 @@ from __future__ import annotations
 
 import json
 import urllib.request
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 FEED_URL = "https://fixturedownload.com/feed/json/fifa-world-cup-2026"
+ESPN_SCOREBOARD_URL = (
+    "https://site.api.espn.com/apis/site/v2/sports/soccer/"
+    "fifa.world/scoreboard?dates={date}"
+)
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/126.0 Safari/537.36")
 
@@ -35,6 +40,10 @@ NAME_TO_CODE = {
     "Spain": "ESP", "Sweden": "SWE", "Switzerland": "SUI", "Tunisia": "TUN",
     "Türkiye": "TUR", "Turkiye": "TUR", "Turkey": "TUR",
     "USA": "USA", "United States": "USA", "Uruguay": "URU", "Uzbekistan": "UZB",
+}
+TEAM_CODES = set(NAME_TO_CODE.values())
+ESPN_ABBR_TO_CODE = {
+    "CGO": "COD", "DRC": "COD",
 }
 
 STAGE_BY_ROUND = {1: "group", 2: "group", 3: "group",
@@ -73,6 +82,157 @@ def _to_match(row: dict) -> dict:
     }
 
 
+def _parse_utc(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(
+            value.replace("Z", "+00:00")
+        ).astimezone(timezone.utc)
+    except ValueError:
+        pass
+    for fmt in ("%Y-%m-%d %H:%M:%SZ", "%Y-%m-%dT%H:%MZ",
+                "%Y-%m-%dT%H:%M:%SZ"):
+        try:
+            return datetime.strptime(value, fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            pass
+    return None
+
+
+def _espn_team_code(comp: dict) -> str | None:
+    team = comp.get("team") or {}
+    abbr = str(team.get("abbreviation") or "").upper()
+    if abbr in TEAM_CODES:
+        return abbr
+    if abbr in ESPN_ABBR_TO_CODE:
+        return ESPN_ABBR_TO_CODE[abbr]
+    for key in ("displayName", "shortDisplayName", "name", "location"):
+        code = NAME_TO_CODE.get(str(team.get(key) or ""))
+        if code:
+            return code
+    return None
+
+
+def _score_int(value) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _espn_final(event: dict) -> dict | None:
+    comp = (event.get("competitions") or [{}])[0]
+    status_type = ((comp.get("status") or {}).get("type") or {})
+    if not status_type.get("completed"):
+        return None
+    if status_type.get("state") and status_type.get("state") != "post":
+        return None
+
+    by_side = {c.get("homeAway"): c for c in comp.get("competitors") or []}
+    home, away = by_side.get("home"), by_side.get("away")
+    if not home or not away:
+        return None
+    home_code, away_code = _espn_team_code(home), _espn_team_code(away)
+    gh, ga = _score_int(home.get("score")), _score_int(away.get("score"))
+    if not home_code or not away_code or gh is None or ga is None:
+        return None
+
+    winner = None
+    if gh == ga:
+        for side in (home, away):
+            if side.get("winner"):
+                winner = _espn_team_code(side)
+                break
+    return {
+        "home": home_code,
+        "away": away_code,
+        "score": [gh, ga],
+        "winner": winner,
+        "date_utc": comp.get("date") or event.get("date"),
+    }
+
+
+def _espn_dates_to_check(matches: list[dict]) -> list[str]:
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(hours=72)
+    end = now + timedelta(hours=8)
+    dates: set[str] = set()
+    for m in matches:
+        if not (m.get("home") and m.get("away")) or m.get("score"):
+            continue
+        dt = _parse_utc(m.get("date_utc"))
+        if dt and start <= dt <= end:
+            dates.add(dt.strftime("%Y%m%d"))
+            # ESPN scoreboard uses the event's local broadcast day, so UTC
+            # early-morning matches can appear under the previous date.
+            dates.add((dt - timedelta(days=1)).strftime("%Y%m%d"))
+            dates.add((dt + timedelta(days=1)).strftime("%Y%m%d"))
+    return sorted(dates)
+
+
+def _find_match(matches: list[dict], final: dict) -> dict | None:
+    event_dt = _parse_utc(final.get("date_utc"))
+    best, best_delta = None, None
+    for m in matches:
+        if m.get("home") != final["home"] or m.get("away") != final["away"]:
+            continue
+        match_dt = _parse_utc(m.get("date_utc"))
+        if event_dt and match_dt:
+            delta = abs((match_dt - event_dt).total_seconds())
+            if delta > 12 * 3600:
+                continue
+        else:
+            delta = 0
+        if best is None or delta < best_delta:
+            best, best_delta = m, delta
+    return best
+
+
+def sync_espn_scores(matches: list[dict] | None = None,
+                     quiet: bool = False) -> int:
+    """用 ESPN 终场状态补齐比分；只采纳 completed 的最终结果。"""
+    from . import db
+
+    matches = matches or db.load_matches()
+    dates = _espn_dates_to_check(matches)
+    if not dates:
+        return 0
+
+    patches, seen = [], set()
+    for date in dates:
+        try:
+            req = urllib.request.Request(
+                ESPN_SCOREBOARD_URL.format(date=date),
+                headers={"User-Agent": UA},
+            )
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+        except Exception as exc:  # noqa: BLE001 - ESPN 补丁失败不阻断主 feed
+            if not quiet:
+                print(f"  [fetch] ESPN 补丁失败 {date}（{exc}）")
+            continue
+        for event in payload.get("events") or []:
+            final = _espn_final(event)
+            if not final:
+                continue
+            match = _find_match(matches, final)
+            if not match or match["match"] in seen:
+                continue
+            patched = dict(match)
+            patched["score"] = final["score"]
+            patched["winner"] = final["winner"]
+            patches.append(patched)
+            seen.add(match["match"])
+
+    if patches:
+        db.upsert_matches(patches, source="espn")
+        if not quiet:
+            nums = ", ".join(str(m["match"]) for m in patches)
+            print(f"  [fetch] ESPN 终场比分补丁 {len(patches)} 场（第 {nums} 场）")
+    return len(patches)
+
+
 def sync(quiet: bool = False) -> bool:
     """拉取 feed 并写入数据库（手动录入的比分不会被覆盖）。"""
     from . import db
@@ -83,17 +243,18 @@ def sync(quiet: bool = False) -> bool:
     except Exception as exc:  # noqa: BLE001 - 网络问题一律降级
         if not quiet:
             print(f"  [fetch] 同步失败（{exc}），沿用数据库现有赛程")
-        return False
+        return bool(sync_espn_scores(db.load_matches(), quiet))
 
     matches = sorted((_to_match(r) for r in feed), key=lambda m: m["match"])
     if len(matches) != 104:
         if not quiet:
             print(f"  [fetch] feed 异常：{len(matches)} 场 ≠ 104，忽略本次同步")
-        return False
+        return bool(sync_espn_scores(db.load_matches(), quiet))
     db.upsert_matches(matches, source="feed")
-    played = sum(1 for m in matches if m["score"])
+    sync_espn_scores(db.load_matches(), quiet)
+    played = sum(1 for m in db.load_matches() if m["score"])
     if not quiet:
-        print(f"  [fetch] 已同步 104 场赛程，其中 {played} 场有比分")
+        print(f"  [fetch] 已同步 104 场赛程，当前 {played} 场有比分")
     return True
 
 

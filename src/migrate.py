@@ -46,7 +46,7 @@ def main() -> None:
         db.save_champ_snapshot(h["date"], h.get("played", 0),
                                h.get("sims", 0), h["champion"])
 
-    # 4) 当前盘口缓存存一份审计快照
+    # 4) 当前市场参考缓存存一份审计快照
     odds = _load("odds.json", None)
     if odds:
         db.snapshot_odds("h2h", odds.get("h2h", {}))

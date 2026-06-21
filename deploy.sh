@@ -23,6 +23,6 @@ if [[ "$1" != "--init" ]]; then
 fi
 
 rsync -avz --delete "${EXCLUDES[@]}" ./ "$SERVER:$DEST/"
-echo "--- 代码已同步，触发服务器重算 ---"
-ssh "$SERVER" "cd $DEST && mkdir -p out && nohup ./update.sh >> out/update.log 2>&1 & echo started"
+echo "--- 代码已同步，触发服务器硬数据重算 ---"
+ssh "$SERVER" "cd $DEST && mkdir -p out && nohup ./ops_update.sh >> out/ops_update.log 2>&1 & echo started"
 echo "--- 部署完成 ---"
