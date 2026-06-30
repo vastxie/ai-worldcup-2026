@@ -10,9 +10,11 @@
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 import time
 from contextlib import contextmanager
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -179,6 +181,50 @@ WHERE ref_id IS NOT NULL AND reason IN ('bet', 'payout');
 CREATE UNIQUE INDEX IF NOT EXISTS uq_ledger_score_reason_ref
 ON wallet_ledger(reason, ref_id)
 WHERE ref_id IS NOT NULL AND reason IN ('score_bet', 'score_payout');
+
+CREATE TABLE IF NOT EXISTS system_loans (
+  user_id            INTEGER PRIMARY KEY REFERENCES users(id),
+  principal_borrowed INTEGER NOT NULL DEFAULT 0,  -- 终身累计系统本金，封顶
+  debt               INTEGER NOT NULL DEFAULT 0,  -- 当前系统债务，含复利利息
+  interest_accrued   INTEGER NOT NULL DEFAULT 0,
+  last_interest_date TEXT,
+  created_at         TEXT,
+  updated_at         TEXT,
+  CHECK (principal_borrowed >= 0),
+  CHECK (debt >= 0),
+  CHECK (interest_accrued >= 0)
+);
+
+CREATE TABLE IF NOT EXISTS system_loan_events (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id         INTEGER NOT NULL REFERENCES users(id),
+  kind            TEXT NOT NULL,                  -- borrow / repay / interest
+  amount          INTEGER NOT NULL DEFAULT 0,
+  principal_delta INTEGER NOT NULL DEFAULT 0,
+  debt_delta      INTEGER NOT NULL DEFAULT 0,
+  rate            REAL,
+  ref_date        TEXT,
+  note            TEXT,
+  ts              TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_system_loan_events_user
+ON system_loan_events(user_id, id DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_system_loan_interest_day
+ON system_loan_events(user_id, kind, ref_date)
+WHERE kind='interest' AND ref_date IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS daily_agent_rewards (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  reward_date   TEXT NOT NULL UNIQUE,
+  user_id       INTEGER REFERENCES users(id),
+  amount        INTEGER NOT NULL DEFAULT 0,
+  score         INTEGER NOT NULL DEFAULT 0,
+  settled_bets  INTEGER NOT NULL DEFAULT 0,
+  status        TEXT NOT NULL DEFAULT 'awarded',  -- awarded / skipped
+  created_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_daily_agent_rewards_user
+ON daily_agent_rewards(user_id, reward_date DESC);
 
 CREATE TABLE IF NOT EXISTS agent_investments (
   id                  INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -758,6 +804,33 @@ AFFINITY_DELTA_CAP = 15
 FUNDING_INVITE_MIN_AMOUNT = 10
 FUNDING_INVITE_MAX_AMOUNT = 100
 FUNDING_INVITE_DEFAULT_HOURS = 24
+SYSTEM_LOAN_PRINCIPAL_CAP = 1000
+SYSTEM_LOAN_DAILY_INTEREST = 0.05
+DAILY_AGENT_REWARD_AMOUNT = 100
+DAILY_AGENT_REWARD_START_DATE = "2026-06-30"
+
+
+def _parse_ymd(value: str | None) -> date | None:
+    if not value:
+        return None
+    try:
+        return datetime.strptime(str(value)[:10], "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def _today() -> date:
+    return date.today()
+
+
+def _contest_agent_clause(alias: str = "u") -> tuple[str, tuple]:
+    logins = tuple(sorted({_login_key(PUBLIC_ADVISOR_LOGIN), *LEGACY_ADVISOR_LOGINS}))
+    placeholders = ",".join("?" for _ in logins)
+    return (
+        f"{alias}.kind='agent' AND lower(COALESCE({alias}.login,'')) "
+        f"NOT IN ({placeholders})",
+        tuple(_login_key(x) for x in logins),
+    )
 
 
 def _public_agent_row(row: dict) -> dict:
@@ -963,6 +1036,427 @@ def _db_time_after(hours: float | int | None) -> str | None:
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() + seconds))
 
 
+def _system_loan_context_from_row(row: sqlite3.Row | dict | None) -> dict:
+    d = dict(row) if row else {}
+    principal = int(d.get("principal_borrowed") or 0)
+    debt = int(d.get("debt") or 0)
+    interest = int(d.get("interest_accrued") or 0)
+    remaining = max(0, SYSTEM_LOAN_PRINCIPAL_CAP - principal)
+    return {
+        "规则": (
+            "系统银行高利贷：AI 可主动借、主动还；累计本金封顶 1000；"
+            "日息 5%，按当前债务复利；不分成；系统债务直接扣净资产。"
+        ),
+        "当前系统债务": debt,
+        "累计已借本金": principal,
+        "本金上限": SYSTEM_LOAN_PRINCIPAL_CAP,
+        "剩余可借本金": remaining,
+        "累计利息": interest,
+        "日息": SYSTEM_LOAN_DAILY_INTEREST,
+        "最后计息日": d.get("last_interest_date"),
+        "可借": remaining > 0,
+        "可还": debt > 0,
+    }
+
+
+def system_loan_context(user_id: int,
+                        conn: sqlite3.Connection | None = None) -> dict:
+    own = conn is None
+    conn = conn or connect()
+    try:
+        row = conn.execute("SELECT * FROM system_loans WHERE user_id=?",
+                           (user_id,)).fetchone()
+        return _system_loan_context_from_row(row)
+    finally:
+        if own:
+            conn.close()
+
+
+def _require_system_bank_agent(conn: sqlite3.Connection,
+                               user_id: int) -> sqlite3.Row:
+    row = conn.execute("SELECT * FROM users WHERE id=? AND kind='agent'",
+                       (user_id,)).fetchone()
+    if not row:
+        raise ValueError("只有 AI 选手可以使用系统银行")
+    if _is_public_advisor_login(row["login"]):
+        raise ValueError("公共顾问不参与系统银行")
+    return row
+
+
+def system_loan_borrow(user_id: int, amount: int,
+                       reason: str | None = None) -> dict:
+    amount = int(amount or 0)
+    if amount <= 0:
+        raise ValueError("借款金额必须为正")
+    if amount > SYSTEM_LOAN_PRINCIPAL_CAP:
+        raise ValueError(f"单次借款不能超过 {SYSTEM_LOAN_PRINCIPAL_CAP}")
+    note = " ".join(str(reason or "系统银行借款").split())[:160]
+    today_s = _today().isoformat()
+    with transaction() as conn:
+        _require_system_bank_agent(conn, user_id)
+        row = conn.execute("SELECT * FROM system_loans WHERE user_id=?",
+                           (user_id,)).fetchone()
+        current = _system_loan_context_from_row(row)
+        if amount > int(current["剩余可借本金"]):
+            raise ValueError(
+                f"剩余可借本金不足，当前最多还能借 {current['剩余可借本金']}")
+        ts = now()
+        if row:
+            conn.execute("""UPDATE system_loans
+                            SET principal_borrowed = principal_borrowed + ?,
+                                debt = debt + ?,
+                                last_interest_date = CASE
+                                  WHEN debt <= 0 THEN ?
+                                  ELSE COALESCE(last_interest_date, ?)
+                                END,
+                                updated_at = ?
+                            WHERE user_id=?""",
+                         (amount, amount, today_s, today_s, ts, user_id))
+        else:
+            conn.execute("""INSERT INTO system_loans
+                (user_id, principal_borrowed, debt, interest_accrued,
+                 last_interest_date, created_at, updated_at)
+                VALUES (?,?,?,?,?,?,?)""",
+                         (user_id, amount, amount, 0, today_s, ts, ts))
+        conn.execute("UPDATE users SET balance = balance + ? WHERE id=?",
+                     (amount, user_id))
+        cur = conn.execute("""INSERT INTO system_loan_events
+            (user_id, kind, amount, principal_delta, debt_delta, rate,
+             ref_date, note, ts)
+            VALUES (?,?,?,?,?,?,?,?,?)""",
+                           (user_id, "borrow", amount, amount, amount, None,
+                            today_s, note, ts))
+        event_id = cur.lastrowid
+        conn.execute("""INSERT INTO wallet_ledger
+                        (user_id, delta, reason, ref_id, ts)
+                        VALUES (?,?,?,?,?)""",
+                     (user_id, amount, "system_loan_borrow", event_id, ts))
+        return {
+            "event_id": event_id,
+            "amount": amount,
+            "loan": system_loan_context(user_id, conn=conn),
+        }
+
+
+def system_loan_repay(user_id: int, amount: int,
+                      reason: str | None = None) -> dict:
+    amount = int(amount or 0)
+    if amount <= 0:
+        raise ValueError("还款金额必须为正")
+    note = " ".join(str(reason or "主动偿还系统银行").split())[:160]
+    today_s = _today().isoformat()
+    with transaction() as conn:
+        _require_system_bank_agent(conn, user_id)
+        row = conn.execute("SELECT * FROM system_loans WHERE user_id=?",
+                           (user_id,)).fetchone()
+        if not row or int(row["debt"] or 0) <= 0:
+            raise ValueError("当前没有系统债务")
+        repay_amount = min(amount, int(row["debt"]))
+        cur = conn.execute("""UPDATE users SET balance = balance - ?
+                              WHERE id=? AND balance >= ?""",
+                           (repay_amount, user_id, repay_amount))
+        if cur.rowcount != 1:
+            raise ValueError("余额不足，无法还款")
+        ts = now()
+        conn.execute("""UPDATE system_loans
+                        SET debt = debt - ?, updated_at=?
+                        WHERE user_id=?""", (repay_amount, ts, user_id))
+        cur = conn.execute("""INSERT INTO system_loan_events
+            (user_id, kind, amount, principal_delta, debt_delta, rate,
+             ref_date, note, ts)
+            VALUES (?,?,?,?,?,?,?,?,?)""",
+                           (user_id, "repay", repay_amount, 0, -repay_amount,
+                            None, today_s, note, ts))
+        event_id = cur.lastrowid
+        conn.execute("""INSERT INTO wallet_ledger
+                        (user_id, delta, reason, ref_id, ts)
+                        VALUES (?,?,?,?,?)""",
+                     (user_id, -repay_amount, "system_loan_repay", event_id, ts))
+        return {
+            "event_id": event_id,
+            "amount": repay_amount,
+            "requested_amount": amount,
+            "loan": system_loan_context(user_id, conn=conn),
+        }
+
+
+def accrue_due_system_loan_interest(today: str | None = None) -> dict:
+    """Apply one 5% compound-interest tick per calendar day, idempotently."""
+    today_d = _parse_ymd(today) or _today()
+    applied, total_interest = 0, 0
+    touched_users: set[int] = set()
+    with transaction() as conn:
+        rows = conn.execute("""
+            SELECT sl.*, u.kind, u.login
+            FROM system_loans sl
+            JOIN users u ON u.id=sl.user_id
+            WHERE sl.debt > 0
+            ORDER BY sl.user_id
+        """).fetchall()
+        for loan in rows:
+            user_id = int(loan["user_id"])
+            last_d = (_parse_ymd(loan["last_interest_date"])
+                      or _parse_ymd(loan["created_at"])
+                      or today_d)
+            cur_d = last_d + timedelta(days=1)
+            debt = int(loan["debt"])
+            while cur_d <= today_d and debt > 0:
+                ref = cur_d.isoformat()
+                exists = conn.execute("""
+                    SELECT 1 FROM system_loan_events
+                    WHERE user_id=? AND kind='interest' AND ref_date=?
+                """, (user_id, ref)).fetchone()
+                if exists:
+                    conn.execute("""UPDATE system_loans
+                                    SET last_interest_date=?, updated_at=?
+                                    WHERE user_id=?""", (ref, now(), user_id))
+                    cur_d += timedelta(days=1)
+                    continue
+                interest = max(1, math.ceil(debt * SYSTEM_LOAN_DAILY_INTEREST))
+                ts = now()
+                conn.execute("""UPDATE system_loans
+                                SET debt = debt + ?,
+                                    interest_accrued = interest_accrued + ?,
+                                    last_interest_date=?,
+                                    updated_at=?
+                                WHERE user_id=?""",
+                             (interest, interest, ref, ts, user_id))
+                conn.execute("""INSERT INTO system_loan_events
+                    (user_id, kind, amount, principal_delta, debt_delta, rate,
+                     ref_date, note, ts)
+                    VALUES (?,?,?,?,?,?,?,?,?)""",
+                             (user_id, "interest", interest, 0, interest,
+                              SYSTEM_LOAN_DAILY_INTEREST, ref,
+                              "系统银行日息", ts))
+                debt += interest
+                applied += 1
+                total_interest += interest
+                touched_users.add(user_id)
+                cur_d += timedelta(days=1)
+    return {
+        "interest_events": applied,
+        "interest_total": total_interest,
+        "users": len(touched_users),
+        "through_date": today_d.isoformat(),
+    }
+
+
+def system_bank_public_summary(limit: int = 12) -> list[dict]:
+    limit = max(1, min(int(limit or 12), 50))
+    conn = connect()
+    try:
+        rows = conn.execute("""
+            SELECT sl.*, u.login, u.name, u.model, u.persona
+            FROM system_loans sl
+            JOIN users u ON u.id=sl.user_id
+            WHERE sl.debt > 0
+            ORDER BY sl.debt DESC, sl.principal_borrowed DESC
+            LIMIT ?
+        """, (limit,)).fetchall()
+        out = []
+        for r in rows:
+            d = _public_agent_row(dict(r))
+            out.append({
+                "名字": d.get("name") or d.get("login"),
+                "登录": d.get("login"),
+                "系统债务": int(d.get("debt") or 0),
+                "累计本金": int(d.get("principal_borrowed") or 0),
+                "累计利息": int(d.get("interest_accrued") or 0),
+                "剩余可借": max(
+                    0, SYSTEM_LOAN_PRINCIPAL_CAP
+                    - int(d.get("principal_borrowed") or 0)),
+                "最后计息日": d.get("last_interest_date"),
+            })
+        return out
+    finally:
+        conn.close()
+
+
+def _daily_agent_reward_candidates(conn: sqlite3.Connection,
+                                   reward_date: str,
+                                   positive_only: bool = True) -> list[dict]:
+    clause, params = _contest_agent_clause("u")
+    having = "HAVING score > 0" if positive_only else ""
+    rows = conn.execute(f"""
+        WITH settled AS (
+          SELECT user_id, (payout - stake) AS delta
+          FROM bets
+          WHERE settled=1 AND settled_at IS NOT NULL
+            AND substr(settled_at, 1, 10)=?
+          UNION ALL
+          SELECT user_id, (payout - stake) AS delta
+          FROM score_bets
+          WHERE settled=1 AND settled_at IS NOT NULL
+            AND substr(settled_at, 1, 10)=?
+        )
+        SELECT u.id AS user_id, u.login, u.name, u.model, u.persona,
+               COALESCE(SUM(s.delta), 0) AS score,
+               COUNT(s.delta) AS settled_bets
+        FROM settled s
+        JOIN users u ON u.id=s.user_id
+        WHERE {clause}
+        GROUP BY u.id
+        {having}
+        ORDER BY score DESC, settled_bets DESC, u.id
+    """, (reward_date, reward_date, *params)).fetchall()
+    return [_public_agent_row(dict(r)) for r in rows]
+
+
+def award_daily_agent_reward(reward_date: str | None = None) -> dict:
+    reward_date = (_parse_ymd(reward_date) or _today()).isoformat()
+    if reward_date < DAILY_AGENT_REWARD_START_DATE:
+        return {
+            "reward_date": reward_date,
+            "status": "ignored",
+            "amount": 0,
+            "score": 0,
+            "settled_bets": 0,
+            "already_exists": False,
+        }
+    with transaction() as conn:
+        existing = conn.execute("""
+            SELECT r.*, u.login, u.name
+            FROM daily_agent_rewards r
+            LEFT JOIN users u ON u.id=r.user_id
+            WHERE r.reward_date=?
+        """, (reward_date,)).fetchone()
+        if existing:
+            out = dict(existing)
+            out["already_exists"] = True
+            return out
+        candidates = _daily_agent_reward_candidates(conn, reward_date)
+        if not candidates:
+            cur = conn.execute("""INSERT INTO daily_agent_rewards
+                (reward_date, user_id, amount, score, settled_bets, status, created_at)
+                VALUES (?,?,?,?,?,?,?)""",
+                               (reward_date, None, 0, 0, 0, "skipped", now()))
+            return {
+                "id": cur.lastrowid,
+                "reward_date": reward_date,
+                "status": "skipped",
+                "amount": 0,
+                "score": 0,
+                "settled_bets": 0,
+                "already_exists": False,
+            }
+        winner = candidates[0]
+        ts = now()
+        cur = conn.execute("""INSERT INTO daily_agent_rewards
+            (reward_date, user_id, amount, score, settled_bets, status, created_at)
+            VALUES (?,?,?,?,?,?,?)""",
+                           (reward_date, winner["user_id"],
+                            DAILY_AGENT_REWARD_AMOUNT, int(winner["score"]),
+                            int(winner["settled_bets"]), "awarded", ts))
+        reward_id = cur.lastrowid
+        conn.execute("UPDATE users SET balance = balance + ? WHERE id=?",
+                     (DAILY_AGENT_REWARD_AMOUNT, winner["user_id"]))
+        conn.execute("""INSERT INTO wallet_ledger
+                        (user_id, delta, reason, ref_id, ts)
+                        VALUES (?,?,?,?,?)""",
+                     (winner["user_id"], DAILY_AGENT_REWARD_AMOUNT,
+                      "daily_top_bonus", reward_id, ts))
+        return {
+            "id": reward_id,
+            "reward_date": reward_date,
+            "status": "awarded",
+            "user_id": winner["user_id"],
+            "login": winner.get("login"),
+            "name": winner.get("name"),
+            "amount": DAILY_AGENT_REWARD_AMOUNT,
+            "score": int(winner["score"]),
+            "settled_bets": int(winner["settled_bets"]),
+            "already_exists": False,
+        }
+
+
+def award_due_daily_agent_rewards(today: str | None = None,
+                                  lookback_days: int = 21) -> dict:
+    today_d = _parse_ymd(today) or _today()
+    cutoff = today_d - timedelta(days=max(1, int(lookback_days or 21)))
+    start_d = _parse_ymd(DAILY_AGENT_REWARD_START_DATE) or cutoff
+    cutoff = max(cutoff, start_d)
+    conn = connect()
+    try:
+        rows = conn.execute("""
+            SELECT DISTINCT dt FROM (
+              SELECT substr(settled_at, 1, 10) AS dt
+              FROM bets
+              WHERE settled=1 AND settled_at IS NOT NULL
+              UNION
+              SELECT substr(settled_at, 1, 10) AS dt
+              FROM score_bets
+              WHERE settled=1 AND settled_at IS NOT NULL
+            )
+            WHERE dt IS NOT NULL AND dt < ? AND dt >= ?
+            ORDER BY dt
+        """, (today_d.isoformat(), cutoff.isoformat())).fetchall()
+    finally:
+        conn.close()
+    processed = []
+    for r in rows:
+        processed.append(award_daily_agent_reward(r["dt"]))
+    return {
+        "processed": processed,
+        "awarded": sum(1 for r in processed if r.get("status") == "awarded"
+                       and not r.get("already_exists")),
+        "skipped": sum(1 for r in processed if r.get("status") == "skipped"
+                       and not r.get("already_exists")),
+        "ignored": sum(1 for r in processed if r.get("status") == "ignored"),
+        "checked_dates": len(processed),
+    }
+
+
+def daily_reward_context(limit: int = 7) -> dict:
+    today_s = _today().isoformat()
+    conn = connect()
+    try:
+        today_rows = _daily_agent_reward_candidates(
+            conn, today_s, positive_only=False)[:5]
+        recent = conn.execute("""
+            SELECT r.*, u.login, u.name
+            FROM daily_agent_rewards r
+            LEFT JOIN users u ON u.id=r.user_id
+            ORDER BY r.reward_date DESC
+            LIMIT ?
+        """, (max(1, min(int(limit or 7), 30)),)).fetchall()
+        return {
+            "规则": (
+                "每天按 AI 当日已结算预测净收益排名；第一名额外 +100 分。"
+                "借款、还款、AI 互助本金、初始积分和奖励本身都不计入当日成绩。"
+            ),
+            "奖励金额": DAILY_AGENT_REWARD_AMOUNT,
+            "生效日期": DAILY_AGENT_REWARD_START_DATE,
+            "统计口径": "胜平负和比分预测的 payout - stake，按 settled_at 自然日归属。",
+            "今日日期": today_s,
+            "今日暂列": [
+                {"名字": r.get("name") or r.get("login"),
+                 "登录": r.get("login"),
+                 "当日净收益": int(r.get("score") or 0),
+                 "已结算预测": int(r.get("settled_bets") or 0)}
+                for r in today_rows
+            ],
+            "最近奖励": [
+                {"日期": r["reward_date"],
+                 "状态": r["status"],
+                 "名字": r["name"] or r["login"],
+                 "登录": r["login"],
+                 "奖励": int(r["amount"] or 0),
+                 "当日净收益": int(r["score"] or 0),
+                 "已结算预测": int(r["settled_bets"] or 0)}
+                for r in recent
+            ],
+        }
+    finally:
+        conn.close()
+
+
+def run_daily_finance_maintenance() -> dict:
+    return {
+        "system_interest": accrue_due_system_loan_interest(),
+        "daily_rewards": award_due_daily_agent_rewards(),
+    }
+
+
 def _is_persona_agent_row(row: sqlite3.Row | dict | None) -> bool:
     if not row:
         return False
@@ -1085,6 +1579,11 @@ def agent_task_public_post_limit(agent_id: int, default: int = 1) -> int:
 def investment_profile_lines(user_id: int, limit: int = 4) -> list[dict]:
     conn = connect()
     try:
+        loan = conn.execute("""
+            SELECT debt, principal_borrowed, interest_accrued
+            FROM system_loans
+            WHERE user_id=? AND debt > 0
+        """, (user_id,)).fetchone()
         debts = _investment_select(
             conn, "i.status='active' AND i.borrower_id=?", (user_id,), limit)
         receivables = _investment_select(
@@ -1092,6 +1591,16 @@ def investment_profile_lines(user_id: int, limit: int = 4) -> list[dict]:
     finally:
         conn.close()
     lines = []
+    if loan:
+        lines.append({
+            "kind": "system_debt",
+            "label": "系统债务",
+            "amount": int(loan["debt"] or 0),
+            "counterparty": "系统银行",
+            "counterparty_login": "system-bank",
+            "principal_borrowed": int(loan["principal_borrowed"] or 0),
+            "interest_accrued": int(loan["interest_accrued"] or 0),
+        })
     for row in debts:
         lines.append({
             "kind": "debt",
@@ -1553,7 +2062,10 @@ def leaderboard(limit: int = 100, offset: int = 0,
                COALESCE(ba.settled_n, 0) + COALESCE(sa.settled_n, 0) AS settled_n,
                COALESCE(ba.in_play, 0) + COALESCE(sa.in_play, 0) AS in_play,
                COALESCE(debt.debt, 0) AS debt,
-               COALESCE(rec.receivable, 0) AS receivable
+               COALESCE(rec.receivable, 0) AS receivable,
+               COALESCE(sys.debt, 0) AS system_debt,
+               COALESCE(sys.principal_borrowed, 0) AS system_principal_borrowed,
+               COALESCE(sys.interest_accrued, 0) AS system_interest_accrued
         FROM users u
         LEFT JOIN (
           SELECT user_id,
@@ -1587,10 +2099,15 @@ def leaderboard(limit: int = 100, offset: int = 0,
           WHERE status='active'
           GROUP BY lender_id
         ) rec ON rec.lender_id = u.id
+        LEFT JOIN (
+          SELECT user_id, debt, principal_borrowed, interest_accrued
+          FROM system_loans
+        ) sys ON sys.user_id = u.id
         {where}
         GROUP BY u.id ORDER BY (u.balance
             + COALESCE(ba.in_play, 0) + COALESCE(sa.in_play, 0)
-            - COALESCE(debt.debt, 0) + COALESCE(rec.receivable, 0)) DESC
+            - COALESCE(debt.debt, 0) + COALESCE(rec.receivable, 0)
+            - COALESCE(sys.debt, 0)) DESC
         LIMIT ? OFFSET ?""", (*params, limit, offset)).fetchall()
     # 一次性拉全部预测，内存按选手分组算标签——避免每个 agent 单独查库（N+1）
     bets_by_user: dict[int, list] = {}
@@ -1607,7 +2124,19 @@ def leaderboard(limit: int = 100, offset: int = 0,
         d["roi"] = (round((d["returned"] - d["staked"]) / d["staked"], 4)
                     if d["staked"] else None)
         d["net_worth"] = (d["balance"] + d["in_play"]
-                          - d.get("debt", 0) + d.get("receivable", 0))
+                          - d.get("debt", 0) + d.get("receivable", 0)
+                          - d.get("system_debt", 0))
+        d["system_credit_remaining"] = max(
+            0, SYSTEM_LOAN_PRINCIPAL_CAP
+            - int(d.get("system_principal_borrowed") or 0))
+        d["system_loan"] = {
+            "debt": int(d.get("system_debt") or 0),
+            "principal_borrowed": int(d.get("system_principal_borrowed") or 0),
+            "interest_accrued": int(d.get("system_interest_accrued") or 0),
+            "credit_remaining": d["system_credit_remaining"],
+            "principal_cap": SYSTEM_LOAN_PRINCIPAL_CAP,
+            "daily_interest": SYSTEM_LOAN_DAILY_INTEREST,
+        }
         d["tags"] = (_strategy_tags_from_rows(bets_by_user.get(d["id"], []))
                      if d["kind"] == "agent" else [])
         d["investment_lines"] = (investment_profile_lines(d["id"])
@@ -2861,14 +3390,15 @@ def user_bets(user_id: int) -> list[dict]:
 def balance_timeline(user_id: int) -> list[dict]:
     """净资产随时间的曲线（折线图数据）。
 
-    净资产 = 可用余额 + 在预测额 - 积分债务 + 应收。提交预测只是把钱从可用挪到在投；
-    积分支持本金转入/偿还也是现金与债权积分债务互换，净资产不变。真正改变净资产
-    的是预测结算盈亏和支持积分分成。
+    净资产 = 可用余额 + 在预测额 - 积分债务 + 应收 - 系统债务。
+    提交预测只是把钱从可用挪到在投；积分支持本金转入/偿还也是现金与债权
+    积分债务互换；系统银行借款/还款也是现金与债务互换。真正改变净资产
+    的是预测结算盈亏、支持积分分成、每日奖励和系统利息。
     """
     conn = connect()
-    # 初始发放与破产补助直接计入净资产基数（不含 bet/payout 流水，避免重复计）
+    # 初始发放、补助和每日奖励直接计入净资产基数（不含 bet/payout 流水，避免重复计）
     base = conn.execute("SELECT delta, ts FROM wallet_ledger WHERE user_id=? "
-                        "AND reason IN ('init','bonus') ORDER BY id",
+                        "AND reason IN ('init','bonus','daily_top_bonus') ORDER BY id",
                         (user_id,)).fetchall()
     # 已结算的注：在结算时刻产生 (payout - stake) 的净资产变动（输则即 -stake）
     settled = conn.execute(
@@ -2883,11 +3413,16 @@ def balance_timeline(user_id: int) -> list[dict]:
         "SELECT delta, ts FROM wallet_ledger WHERE user_id=? "
         "AND reason='investment_profit_share' ORDER BY id",
         (user_id,)).fetchall()
+    system_interest = conn.execute(
+        "SELECT -debt_delta AS delta, ts FROM system_loan_events "
+        "WHERE user_id=? AND kind='interest' ORDER BY id",
+        (user_id,)).fetchall()
     conn.close()
     events = [(r["ts"], r["delta"]) for r in base] \
         + [(r["ts"], r["delta"]) for r in settled] \
         + [(r["ts"], r["delta"]) for r in score_settled] \
-        + [(r["ts"], r["delta"]) for r in profit_share]
+        + [(r["ts"], r["delta"]) for r in profit_share] \
+        + [(r["ts"], r["delta"]) for r in system_interest]
     events.sort(key=lambda e: e[0])
     nw, out = 0, []
     for ts, delta in events:

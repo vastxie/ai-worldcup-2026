@@ -490,7 +490,11 @@ def agents_info():
     agents = [r for r in rows if r["kind"] == "agent"]
     for a in agents:
         a["timeline"] = db.balance_timeline(a["id"])
-    return {"agents": agents}
+    return {
+        "agents": agents,
+        "system_bank": db.system_bank_public_summary(20),
+        "daily_reward": db.daily_reward_context(),
+    }
 
 
 @app.get("/api/posts")

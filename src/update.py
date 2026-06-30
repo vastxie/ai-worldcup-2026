@@ -363,6 +363,14 @@ def _run(sims: int, seed: int | None, do_fetch: bool,
     settled = db.settle_finished_bets()
     if settled:
         print(f"  [bets] 已结算 {settled} 笔预测")
+    finance = db.run_daily_finance_maintenance()
+    fin_interest = finance.get("system_interest") or {}
+    fin_rewards = finance.get("daily_rewards") or {}
+    if fin_interest.get("interest_events") or fin_rewards.get("awarded"):
+        print("  [finance] "
+              f"系统利息 {fin_interest.get('interest_events', 0)} 次/"
+              f"{fin_interest.get('interest_total', 0)} 分；"
+              f"每日奖励 {fin_rewards.get('awarded', 0)} 个")
 
     publish_played = sum(1 for m in db.load_matches()
                          if m["score"] and m["home"] and m["away"])
@@ -385,6 +393,7 @@ def _run(sims: int, seed: int | None, do_fetch: bool,
             "sims": sims, "seed": seed,
             "played": played, "total": 104,
             "market": state.get("market_live", False),
+            "finance": finance,
         },
         "teams": sim_out["teams"],
         "schedule": build_schedule(state),

@@ -110,6 +110,7 @@ def run_pipeline(args: argparse.Namespace) -> dict:
         "played": payload["meta"]["played"],
         "sims": payload["meta"]["sims"],
         "market": payload["meta"].get("market", False),
+        "finance": payload["meta"].get("finance"),
         "content_generated": False,
         "agent_rounds": 0,
         "betting_review": betting_review,

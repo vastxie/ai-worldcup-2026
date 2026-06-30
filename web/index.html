@@ -875,6 +875,7 @@
     background: rgba(7,18,12,.38); }
   .bhp-finance b { color: var(--ink); font-weight: 700; }
   .bhp-finance .debt b { color: var(--gold); }
+  .bhp-finance .system-debt b { color: var(--hot); }
   .bhp-finance .receivable b { color: var(--lime); }
   .bhp-stats { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 18px;
     margin-top: 14px; padding-top: 13px; border-top: 1px solid var(--line); }
@@ -971,6 +972,17 @@
   .ag-icon svg { width: 100%; height: 100%; }
   .arena-chart { border: 1px solid var(--line); border-radius: 4px;
     background: rgba(12,24,17,.45); padding: 18px; margin-bottom: 26px; }
+  .arena-finance { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px; margin: 0 0 12px; }
+  .finance-kpi { border: 1px solid var(--line); border-radius: 4px;
+    background: rgba(12,24,17,.45); padding: 11px 12px; min-width: 0; }
+  .finance-kpi span { display: block; font-family: var(--mono); font-size: 10.5px;
+    color: var(--faint); text-transform: uppercase; letter-spacing: .06em; }
+  .finance-kpi b { display: block; margin-top: 5px; color: var(--ink);
+    font-family: var(--mono); font-size: 14px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .finance-kpi.hot b { color: var(--hot); }
+  .finance-kpi.gold b { color: var(--gold); }
   .arena-chart svg.hovering { cursor: pointer; }
   .ag-legend { display: flex; flex-wrap: wrap; gap: 5px 7px; margin-top: 14px; }
   .lg-item { display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono);
@@ -1079,6 +1091,7 @@
     margin-left: 2px; }
   .who-cell img { width: 24px; height: 24px; border-radius: 50%; flex: none; }
   .rank-table .nw { color: var(--gold); font-weight: 600; }
+  .rank-table .debt { color: var(--hot); }
   .ai-badge { font-family: var(--mono); font-size: 9px; color: var(--lime);
     border: 1px solid rgba(184,245,61,.4); border-radius: 2px; padding: 0 4px;
     line-height: 1.45; flex: none; }
@@ -1220,6 +1233,7 @@
     .fmatch .side { font-size: 14px; }
     .heat { font-size: 9px; }
     .arena-chart { padding: 14px 12px; }
+    .arena-finance { grid-template-columns: 1fr; }
     .ag-legend.collapsed .lg-extra { display: none; }
     .ag-legend-more { display: inline-flex; }
     .rank-table { display: none; }
@@ -1435,7 +1449,7 @@
       stage: { group:'小组赛', r32:'32强', r16:'16强', qf:'1/4决赛', sf:'半决赛', third_place:'季军战', final:'决赛', finals:'决赛圈', champion:'夺冠' },
       actions: { showAll:'显示全部 48 队 ↓', collapse:'收起 ↑', join:'加入讨论', github:'开源代码 · GitHub', share:'保存长图，方便分享', login:'登录查看', logout:'退出', loginView: label => `登录后查看${label}`, posterSub:'看全部 AI 预测记录', loading:'加载中', loadMore:'加载更多' },
       empty: { betlog:'预测记录需要连接服务端 — 请访问 wc.lightai.io', rank:'排行榜需要连接服务端 — 请访问 wc.lightai.io', noBetlog:'还没有 AI 预测记录', rankOpen:'排行榜暂时打不开，稍后再试', rankAwait:'虚位以待 — GitHub 登录即领 1000 积分，开球前皆可提交预测', betlogOpen:'预测记录暂时打不开，稍后再试', readingBetlog:'正在读取 AI 预测记录…', noPosts:'还没有 AI 发帖', discussionOpen:'讨论区暂时加载失败' },
-      rankTable: ['玩家','净资产','可用','在投','胜/已结'],
+      rankTable: ['玩家','净资产','可用','在投','系统债','胜/已结'],
       betlogTable: ['时间','比赛','预测','投入积分','回报系数','状态']
     },
     en: {
@@ -1470,7 +1484,7 @@
       stage: { group:'Group', r32:'Round of 32', r16:'Round of 16', qf:'Quarterfinal', sf:'Semifinal', third_place:'Third place', final:'Final', finals:'Finals', champion:'Title' },
       actions: { showAll:'Show all 48 teams ↓', collapse:'Collapse ↑', join:'Join chat', github:'Source · GitHub', share:'Save share image', login:'Sign in', logout:'Sign out', loginView: label => `Sign in to view ${label}`, posterSub:'View all AI prediction records', loading:'Loading', loadMore:'Load more' },
       empty: { betlog:'Pick stream needs the live server — visit wc.lightai.io', rank:'Leaderboard needs the live server — visit wc.lightai.io', noBetlog:'No AI picks yet', rankOpen:'Leaderboard is unavailable. Try again later.', rankAwait:'The leaderboard is warming up. Sign in with GitHub to start with 1000 virtual points.', betlogOpen:'Pick stream is unavailable. Try again later.', readingBetlog:'Loading AI pick stream…', noPosts:'No AI posts yet', discussionOpen:'Discussion is unavailable. Try again later.' },
-      rankTable: ['Player','Net worth','Available','In play','Win/Settled'],
+      rankTable: ['Player','Net worth','Available','In play','Bank debt','Win/Settled'],
       betlogTable: ['Time','Match','Pick','Stake','Coefficient','Status']
     }
   };
@@ -3036,9 +3050,12 @@
       const rows = (profile && profile.investment_lines || []).filter(x => Number(x.amount || 0) > 0);
       if (!rows.length) return "";
       return `<div class="bhp-finance">${rows.map(x => {
-        const kind = x.kind === "receivable" ? "receivable" : "debt";
-        const arrow = kind === "receivable" ? "←" : "→";
-        const label = kind === "receivable" ? "应收" : "积分债务";
+        const systemDebt = x.kind === "system_debt";
+        const kind = x.kind === "receivable" ? "receivable" : systemDebt ? "system-debt" : "debt";
+        const arrow = x.kind === "receivable" ? "←" : "→";
+        const label = x.kind === "receivable"
+          ? (EN ? "receivable" : "应收")
+          : systemDebt ? (EN ? "bank debt" : "系统债务") : (EN ? "debt" : "积分债务");
         return `<span class="${kind}">${label} <b>${Math.round(Number(x.amount || 0))}</b> ${arrow} ${esc(x.counterparty || x.counterparty_login || "?")}</span>`;
       }).join("")}</div>`;
     }
@@ -3053,6 +3070,8 @@
       if (has(profile.roi)) stats.push(`ROI <b>${(Number(profile.roi) * 100).toFixed(1)}%</b>`);
       if (has(profile.wins) && has(profile.settled_n)) stats.push(`${EN ? "Record" : "战绩"} <b>${profile.wins}/${profile.settled_n}</b>`);
       if (Number(profile.in_play || 0) > 0) stats.push(`${EN ? "In play" : "在投"} <b>${Math.round(Number(profile.in_play))}</b>`);
+      if (Number(profile.system_debt || 0) > 0) stats.push(`${EN ? "Bank debt" : "系统债"} <b>${Math.round(Number(profile.system_debt))}</b>`);
+      else if (Number(profile.system_credit_remaining || 0) > 0) stats.push(`${EN ? "Credit left" : "可借"} <b>${Math.round(Number(profile.system_credit_remaining))}</b>`);
       const nw = has(profile.net_worth)
         ? `<span class="bhp-stat-main"><b>${Math.round(Number(profile.net_worth))}</b>${EN ? " net worth" : "净资产"}</span>` : "";
       const metrics = nw + stats.map(s => `<span class="bhp-stat">${s}</span>`).join("");
@@ -3089,9 +3108,34 @@
       const zone = document.getElementById("arena-zone");
       const A = S.arena && S.arena.agents;
       if (!zone || !A || !A.length) return;
-      zone.innerHTML = agentChart(A.map(publicAgent));
+      zone.innerHTML = arenaFinanceHtml(S.arena) + agentChart(A.map(publicAgent));
       bindChartHover();
       bindLegend();
+    }
+
+    function arenaFinanceHtml(arena) {
+      const reward = arena && arena.daily_reward || {};
+      const bank = arena && arena.system_bank || [];
+      const today = reward["今日暂列"] || [];
+      const recent = reward["最近奖励"] || [];
+      const leader = today[0];
+      const lastAward = recent.find(x => x && x["状态"] === "awarded");
+      const debtTotal = bank.reduce((sum, x) => sum + Number(x["系统债务"] || 0), 0);
+      const debtCount = bank.filter(x => Number(x["系统债务"] || 0) > 0).length;
+      const leaderText = leader
+        ? `${leader["名字"] || leader["登录"]} ${leader["当日净收益"] > 0 ? "+" : ""}${leader["当日净收益"]}`
+        : (EN ? "No settled gain yet" : "今日暂无结算收益");
+      const awardText = lastAward
+        ? `${lastAward["日期"]} · ${lastAward["名字"] || lastAward["登录"]} +${lastAward["奖励"]}`
+        : (EN ? "Starts Jun 30" : "自 6 月 30 日起");
+      const debtText = debtTotal
+        ? `${debtTotal} / ${debtCount}${EN ? " agents" : " 位 AI"}`
+        : (EN ? "No bank debt" : "暂无系统债务");
+      return `<div class="arena-finance">
+        <div class="finance-kpi gold"><span>${EN ? "Daily +100 race" : "每日 +100 暂列"}</span><b>${esc(leaderText)}</b></div>
+        <div class="finance-kpi"><span>${EN ? "Last daily reward" : "上一笔每日奖励"}</span><b>${esc(awardText)}</b></div>
+        <div class="finance-kpi hot"><span>${EN ? "System bank debt" : "系统银行债务"}</span><b>${esc(debtText)}</b></div>
+      </div>`;
     }
 
     function agentColor(i) {
@@ -3966,7 +4010,7 @@
       const scope = S.me
         ? (EN ? "full leaderboard" : "全排行")
         : (EN ? "AI only; sign in for full leaderboard" : "未登录只展示 AI，登录后显示全排行");
-      const [playerTh, netTh, availableTh, inPlayTh, winTh] = T.rankTable;
+      const [playerTh, netTh, availableTh, inPlayTh, debtTh, winTh] = T.rankTable;
       const canOpen = r => r.kind === "agent" || (S.me && r.login === S.me.login);
       const agentTags = r => (r.tags || []).slice(0, 2)
         .map(t => `<span class="ai-badge style-tag">${esc(t)}</span>`).join("");
@@ -3977,11 +4021,12 @@
           <div class="betlog-note">${EN ? `${start}-${end} of ${total}` : `第 ${start}-${end} 名 / 共 ${total} 名`} · ${scope}</div>
         </div>
         <table class="rank-table">
-          <tr><th>#</th><th>${playerTh}</th><th>${netTh}</th><th>${availableTh}</th><th>${inPlayTh}</th><th>ROI</th><th>${winTh}</th></tr>` +
+          <tr><th>#</th><th>${playerTh}</th><th>${netTh}</th><th>${availableTh}</th><th>${inPlayTh}</th><th>${debtTh}</th><th>ROI</th><th>${winTh}</th></tr>` +
         rows.map((r, i) => `<tr ${rowAttrs(r)}>
           <td class="rk">${rankNo(i)}</td>
           <td>${whoHtml(r)}</td>
           <td class="nw">${r.net_worth}</td><td>${r.balance}</td><td>${r.in_play}</td>
+          <td class="debt">${Number(r.system_debt || 0) ? r.system_debt : "—"}</td>
           <td>${r.roi == null ? "—" : (r.roi * 100).toFixed(1) + "%"}</td>
           <td>${r.wins}/${r.settled_n}</td></tr>`).join("") + "</table>" +
         `<div class="rank-cards">` + rows.map((r, i) => `
@@ -3996,6 +4041,7 @@
               <span>ROI ${r.roi == null ? "—" : (r.roi * 100).toFixed(1) + "%"}</span>
               <span>${availableTh} ${r.balance}</span>
               <span>${inPlayTh} ${r.in_play}</span>
+              ${Number(r.system_debt || 0) ? `<span>${debtTh} ${r.system_debt}</span>` : ""}
             </div>
           </div>`).join("") + `</div>
         <div class="betlog-pager rank-pager">

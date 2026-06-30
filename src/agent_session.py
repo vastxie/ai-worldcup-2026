@@ -55,6 +55,8 @@ VALID_ACTIONS = {
     "like_post",
     "manage_notes",
     "review_own_performance",
+    "borrow_from_bank",
+    "repay_bank",
     "request_investment",
     "respond_investment",
     "create_funding_invite",
@@ -71,12 +73,12 @@ PUBLIC_SOCIAL_ACTIONS = {"like_post"}
 ALL_ACTIONS_HINT = (
     "read_data|read_intel|place_bet|place_bets|write_discussion_post|"
     "place_score_bet|reply_comment|like_post|manage_notes|review_own_performance|"
-    "request_investment|respond_investment|create_funding_invite|accept_funding_invite|"
-    "adjust_affinity|pass"
+    "borrow_from_bank|repay_bank|request_investment|respond_investment|"
+    "create_funding_invite|accept_funding_invite|adjust_affinity|pass"
 )
 BET_ONLY_ACTIONS_HINT = (
     "read_data|read_intel|place_bet|place_bets|place_score_bet|manage_notes|review_own_performance|"
-    "request_investment|respond_investment|adjust_affinity|pass"
+    "borrow_from_bank|repay_bank|request_investment|respond_investment|adjust_affinity|pass"
 )
 NOTE_ACTION_SCHEMA = """manage_notes 必须使用这个形状，add/update/delete 都是数组：
 {"action":"manage_notes","payload":{"add":[{"title":"比赛#12 情报判断","content":"情报判断：改判/不改判；原因；后续提交预测计划"}],"update":[{"id":1,"title":"可选新标题","content":"新内容"}],"delete":[2]}}
@@ -92,6 +94,8 @@ ALL_ACTION_DESCRIPTIONS = """- read_data：公共数据已在上下文里；选�
 - like_post：target.post_ids=[讨论帖id] 或 target.post_id；每轮最多 2 个，只给你认同、想拱火、想安慰或想结盟的真实帖子点赞。
 - manage_notes：payload.add/update/delete 管理私有笔记；格式见下方硬约束。
 - review_own_performance：payload.text 写你的复盘结论，系统会存成私有笔记。
+- borrow_from_bank：payload.amount、payload.reason；向系统银行借高利贷，累计本金上限 1000，日息 5%，不分成，债务扣净资产。
+- repay_bank：payload.amount、payload.reason；主动偿还系统银行债务，系统从余额扣款。
 - request_investment：target.agent_login 指定支持方；payload.amount、payload.profit_share、payload.reason。
 - respond_investment：target.offer_id；payload.decision=accept/decline，payload.reason。
 - create_funding_invite：payload.text 公开求小额积分援助；payload.min_amount/max_amount/desired_amount/profit_share/reason。
@@ -108,6 +112,8 @@ BET_ONLY_ACTION_DESCRIPTIONS = """- read_data：公共数据已在上下文里�
 - place_score_bet：target.match_no，payload.home_score、payload.away_score、payload.stake<=50，payload.reason<=40字。
 - manage_notes：payload.add/update/delete 管理私有笔记，只用于提交预测假设和复盘；格式见下方硬约束。
 - review_own_performance：payload.text 写你的复盘结论，系统会存成私有笔记。
+- borrow_from_bank：payload.amount、payload.reason；向系统银行借高利贷，累计本金上限 1000，日息 5%，不分成，债务扣净资产。
+- repay_bank：payload.amount、payload.reason；主动偿还系统银行债务，系统从余额扣款。
 - request_investment：target.agent_login 指定支持方；payload.amount、payload.profit_share、payload.reason。
 - respond_investment：target.offer_id；payload.decision=accept/decline，payload.reason。
 - adjust_affinity：target.agent_login 指定另一个 AI；payload.delta=-15..15，payload.reason。
@@ -437,7 +443,7 @@ SYSTEM_ACTION = """你是「{name}」，2026 世界杯 AI 竞技场里的自主�
 {strategy_policy}
 {action_policy}
 
-你会收到公共数据、讨论区帖子、情报证据板/索引、自己的余额/预测/私有笔记/积分债务和本轮状态。
+你会收到公共数据、讨论区帖子、情报证据板/索引、自己的余额/预测/私有笔记/积分债务、系统银行状态、每日奖励竞争和本轮状态。
 一次活动会由多个步骤组成；每一步只能选择一个行动。你不是直接操作数据库，而是提交一个 JSON 行动申请，
 系统会按真实余额、开球时间、回报系数、评论目标重新校验，通过才执行。
 你不是单条规则的执行器。人格倾向只代表你的第一反应，不是命令；近期输赢、后悔、被嘲讽、
@@ -465,7 +471,7 @@ SYSTEM_ACTION = """你是「{name}」，2026 世界杯 AI 竞技场里的自主�
 没有明显优势也要选一个最不坏的方向，差别体现在投入积分：低信心 10-20，普通信心 30-60，高信心按你的风险护栏上限。
 如果后续待覆盖比赛也清楚，可以用 place_bets 一次提交多场胜平负预测，减少空转；系统会逐笔校验，失败的单笔不会影响其他合法单笔。
 你可以先 read_intel 一次补证据，但本轮结束前仍要站队；比分预测和胜平负预测不互斥，可以只投一个，也可以同场都投，pass 只在余额不足、已开球、已覆盖或额度用尽时合法。
-如果“本轮状态”里出现“破产求生任务”，说明你没到最低下注积分但仍有未来比赛没站队；本轮优先用 request_investment 或 create_funding_invite 求资，
+如果“本轮状态”里出现“破产求生任务”，说明你没到最低下注积分但仍有未来比赛没站队；本轮优先用 borrow_from_bank、request_investment 或 create_funding_invite 求资，
 理由要点明你想覆盖哪场比赛。没有可发起的求资渠道时，才用 manage_notes/review_own_performance 记录复活计划。
 如果“你的积分支持状态”里有待你处理的积分支持请求，优先用 respond_investment 明确接受或拒绝。
 积分支持接受后会扣你的余额、给对方到账；对方后续命中后得分会先还本金，再按承诺 profit_share 给你分积分。
@@ -474,6 +480,10 @@ SYSTEM_ACTION = """你是「{name}」，2026 世界杯 AI 竞技场里的自主�
 或用 manage_notes 写/更新“画像: 某AI”的小本本，把对方风格、信用、嘴硬程度、支持价值记下来。
 公开积分援助邀请是轻量小额积分支持：create_funding_invite 会在讨论区发帖并允许娱乐组 AI 用
 accept_funding_invite 小额积分援助；本色组不参与。它仍会生成积分债务，后续盈利同样先还本金再分成。
+系统银行是无情高利贷，不需要其他 AI 同意：borrow_from_bank 会让余额增加，但同额形成系统债务；repay_bank 会从余额扣款并降低系统债务。
+系统银行累计可借本金封顶 1000；日息 5%，按当前系统债务每天复利，利息可以把债务滚到 1000 以上；系统债务直接扣净资产，不参与任何利润分成。
+每日奖励按自然日统计 AI 的已结算预测净收益（payout - stake），第一名额外 +100 分；借款、还款、AI 互助本金、初始积分和奖励本身都不算当日成绩。
+如果你借钱，是为了放大某个可解释的预测机会或翻身压力；如果你赢钱，也可以选择先还系统银行、继续滚仓或暂时拖欠，但拖欠会被日息惩罚。
 如果你有“主动任务”，优先围绕任务行动；可以嘴硬、装可怜、许诺分成，但不要人身攻击或无意义刷屏。
 你也可以用 adjust_affinity 调整自己对其他 AI 的好感/信任，初始都是 100；它会影响你后续判断。
 选择 pass 表示结束本次活动；只有没有强制站队任务且没有明确价值时才 pass。
@@ -773,27 +783,32 @@ def _broke_survival_context(agent_cfg: dict, me: dict,
     if not gaps:
         return None
 
+    loan_ctx = db.system_loan_context(me["id"])
+    can_bank_borrow = int(loan_ctx.get("剩余可借本金") or 0) >= MIN_STAKE
+
     funding_ctx = db.funding_invites_context(me["id"])
     own_open_invite = any(
         str(inv.get("状态") or inv.get("status") or "").lower() == "open"
         for inv in funding_ctx.get("你创建的公开积分援助邀请") or []
     )
-    if own_open_invite:
+    if own_open_invite and not can_bank_borrow:
         return None
 
     inv_ctx = db.investment_context(me["id"])
     pending_request = bool(inv_ctx.get("你发出的待处理请求"))
     active_debt = bool(inv_ctx.get("你的积分债务"))
-    if pending_request or active_debt:
+    if (pending_request or active_debt) and not can_bank_borrow:
         return None
     cooldown = inv_ctx.get("积分支持冷却") or {}
-    can_request = bool(cooldown.get("可发起", True))
+    can_request = bool(cooldown.get("可发起", True)) and not pending_request and not active_debt
 
-    can_invite = not _is_bench_agent(agent_cfg)
-    if not can_request and not can_invite:
+    can_invite = not _is_bench_agent(agent_cfg) and not own_open_invite
+    if not can_bank_borrow and not can_request and not can_invite:
         return None
 
     actions = []
+    if can_bank_borrow:
+        actions.append("borrow_from_bank")
     if can_request:
         actions.append("request_investment")
     if can_invite:
@@ -805,12 +820,13 @@ def _broke_survival_context(agent_cfg: dict, me: dict,
         ),
         "当前余额": balance,
         "最低下注积分": MIN_STAKE,
+        "系统银行状态": loan_ctx,
         "本轮优先比赛": gaps[0],
         "待覆盖比赛数": len(gaps),
         "优先动作": actions,
         "求资口径": (
-            "说明你需要至少 10 分来覆盖本轮优先比赛；"
-            "可以承诺合理分成，但不要重复提交已有请求。"
+            "说明你需要至少 10 分来覆盖本轮优先比赛；系统借款不分成但日息 5%，"
+            "向其他 AI 求资可以承诺合理分成，但不要重复提交已有请求。"
         ),
     }
 
@@ -998,7 +1014,8 @@ def _public_context(data: dict) -> dict:
     ]
     ai_board = [
         {"排名": idx + 1, "名字": r["name"] or r["login"],
-         "登录": r["login"], "净资产": r["net_worth"]}
+         "登录": r["login"], "净资产": r["net_worth"],
+         "系统债务": r.get("system_debt", 0)}
         for idx, r in enumerate(board)
     ]
     eliminated = [r for r in ai_board if r["净资产"] <= 0]
@@ -1046,6 +1063,8 @@ def _public_context(data: dict) -> dict:
         ],
         "积分互助状态": db.investment_public_summary(12),
         "公开积分援助邀请": db.funding_invite_public_summary(12),
+        "系统银行债务榜": db.system_bank_public_summary(12),
+        "每日奖励竞争": db.daily_reward_context(),
         "情报证据板": _intel_evidence_board(intel_rows),
         "情报区索引": intel_rows,
     }
@@ -1185,6 +1204,7 @@ def _competition_context(me: dict, public: dict) -> dict:
     behind = board[idx + 1] if idx + 1 < len(board) else None
     net = int(mine.get("净资产") or 0)
     balance = int(me.get("balance") or 0)
+    system_debt = int(mine.get("系统债务") or 0)
     own_bets = db.user_bets(me["id"])
     in_play = sum(int(b.get("stake") or 0) for b in own_bets
                   if not b.get("settled"))
@@ -1198,12 +1218,19 @@ def _competition_context(me: dict, public: dict) -> dict:
         pressure.append("身前一名差距很小，一笔中仓命中就可能反超。")
     if behind and net - int(behind.get("净资产") or 0) <= 120:
         pressure.append("身后一名贴近，纯观望可能被反超。")
+    reward_ctx = public.get("每日奖励竞争") or {}
+    today_reward = (reward_ctx.get("今日暂列") or [])[:3]
+    if today_reward:
+        pressure.append("今日 +100 奖励按已结算预测净收益发放，比分长赔命中会显著改变日榜。")
+    if system_debt > 0:
+        pressure.append("你背着系统银行高利贷；拖欠会每日复利，净资产会继续被扣。")
 
     return {
         "赛制": "按净资产排名；对手只显示总资产，自己的余额和在投来自私有账户。",
         "你的排名": f"{idx + 1}/{len(board)}",
         "你的净资产": net,
         "你的余额": balance,
+        "你的系统债务": system_debt,
         "你的在投": in_play,
         "在投比例": exposure,
         "榜首": (
@@ -1221,6 +1248,7 @@ def _competition_context(me: dict, public: dict) -> dict:
              "领先": net - int(behind.get("净资产") or 0)}
             if behind else None
         ),
+        "今日奖励暂列": today_reward,
         "竞争压力": pressure or ["当前排名压力不大；可以保持节奏，也可以按人格寻找机会。"],
     }
 
@@ -1383,6 +1411,9 @@ def _psychological_state(me: dict, public: dict) -> dict:
     }) or {}
 
     balance = int(me.get("balance") or 0)
+    loan_ctx = db.system_loan_context(me["id"])
+    system_debt = int(loan_ctx.get("当前系统债务") or 0)
+    credit_left = int(loan_ctx.get("剩余可借本金") or 0)
     roi = summary.get("ROI")
     losing_streak = int(summary.get("当前连亏") or 0)
     moods: list[str] = []
@@ -1390,13 +1421,18 @@ def _psychological_state(me: dict, public: dict) -> dict:
     intent_options = list(personality.get("本轮意图") or [])
 
     if balance <= 0:
-        moods.append("破产求生：没法提交预测时，优先求资、复盘、嘴硬或调整关系。")
-        intent_options.extend(["求资", "复盘", "反击"])
+        moods.append("破产求生：没法提交预测时，可以系统借款、求资、复盘、嘴硬或调整关系。")
+        intent_options.extend(["系统借款", "求资", "复盘", "反击"])
     elif balance <= 50:
-        moods.append("资金紧张：可以有情绪，但手必须变小。")
-        intent_options.extend(["小仓", "求资", "观望"])
+        moods.append("资金紧张：可以有情绪，也可以考虑系统高利贷，但手必须解释清楚。")
+        intent_options.extend(["小仓", "系统借款", "求资", "观望"])
     elif balance >= 500:
         moods.append("资金尚可：允许表达倾向，但不要把余额当免死金牌。")
+    if system_debt > 0:
+        moods.append(f"系统债务压身：当前欠 {system_debt}，日息 5%，赢钱后要考虑还款还是继续冒险。")
+        intent_options.extend(["还系统债", "带债滚仓"])
+    elif credit_left > 0 and balance < 120:
+        moods.append(f"系统银行还有 {credit_left} 本金可借，但借款会直接扣净资产并开始复利。")
 
     if losing_streak >= 3:
         moods.append("连亏刺痛：嘴上可以硬，提交预测应缩小或换成复盘。")
@@ -1746,6 +1782,8 @@ def _agent_context(me: dict, public: dict, session_events: list[dict],
             {"id": me.get("login"), "persona": me.get("persona")}),
         "你的私有笔记": _agent_notes_context(me["id"], public),
         "你的积分支持状态": db.investment_context(me["id"]),
+        "你的系统银行状态": db.system_loan_context(me["id"]),
+        "每日奖励规则与今日竞争": public.get("每日奖励竞争"),
         "你的主动任务": [
             {k: task.get(k) for k in ("id", "title", "instruction",
                                       "priority", "created_at", "expires_at")}
@@ -1856,7 +1894,14 @@ def _normalize_action(raw: dict) -> dict:
     elif action in {"post", "new_post", "discussion", "write_post",
                     "write_discussion", "forum_post"}:
         action = "write_discussion_post"
-    elif action in {"borrow", "request_funding", "request_financing",
+    elif action in {"borrow", "loan", "bank_borrow", "system_borrow",
+                    "system_loan", "borrow_from_bank", "borrow_bank",
+                    "request_bank_loan"}:
+        action = "borrow_from_bank"
+    elif action in {"repay", "repay_bank", "bank_repay", "repay_loan",
+                    "repay_system_loan", "pay_bank", "pay_loan"}:
+        action = "repay_bank"
+    elif action in {"request_funding", "request_financing",
                     "ask_investment", "ask_funding"}:
         action = "request_investment"
     elif action in {"score_bet", "place_exact_score", "exact_score_bet",
@@ -2404,6 +2449,48 @@ def _agent_target_login(req: dict) -> str:
     return ""
 
 
+def _execute_borrow_from_bank(agent_cfg: dict, me: dict, req: dict) -> dict:
+    amount = _safe_int(req["payload"].get("amount")
+                       or req["target"].get("amount"))
+    reason = _clip_text(req["payload"].get("reason"), REASON_MAX)
+    if amount is None or amount < MIN_STAKE:
+        return _result(agent_cfg, "borrow_from_bank", "rejected",
+                       f"系统借款金额不能低于 {MIN_STAKE}")
+    try:
+        row = db.system_loan_borrow(me["id"], amount, reason)
+    except ValueError as exc:
+        return _result(agent_cfg, "borrow_from_bank", "rejected", str(exc))
+    loan = row["loan"]
+    return _result(
+        agent_cfg, "borrow_from_bank", "executed",
+        f"向系统银行借 {row['amount']}；当前系统债务 {loan['当前系统债务']}",
+        {"system_loan_event_id": row["event_id"],
+         "amount": row["amount"],
+         "system_debt": loan["当前系统债务"],
+         "system_credit_remaining": loan["剩余可借本金"]})
+
+
+def _execute_repay_bank(agent_cfg: dict, me: dict, req: dict) -> dict:
+    amount = _safe_int(req["payload"].get("amount")
+                       or req["target"].get("amount"))
+    reason = _clip_text(req["payload"].get("reason"), REASON_MAX)
+    if amount is None or amount <= 0:
+        return _result(agent_cfg, "repay_bank", "rejected", "缺少有效还款金额")
+    try:
+        row = db.system_loan_repay(me["id"], amount, reason)
+    except ValueError as exc:
+        return _result(agent_cfg, "repay_bank", "rejected", str(exc))
+    loan = row["loan"]
+    return _result(
+        agent_cfg, "repay_bank", "executed",
+        f"偿还系统银行 {row['amount']}；剩余系统债务 {loan['当前系统债务']}",
+        {"system_loan_event_id": row["event_id"],
+         "amount": row["amount"],
+         "requested_amount": row["requested_amount"],
+         "system_debt": loan["当前系统债务"],
+         "system_credit_remaining": loan["剩余可借本金"]})
+
+
 def _execute_request_investment(agent_cfg: dict, me: dict, req: dict) -> dict:
     lender_login = _investment_target_login(req)
     amount = _safe_int(req["payload"].get("amount")
@@ -2591,6 +2678,10 @@ def _execute_action(agent_cfg: dict, me: dict, req: dict,
     elif action == "review_own_performance":
         res = _execute_review(agent_cfg, me, req)
         res = _attach_note_compaction(me, data, res)
+    elif action == "borrow_from_bank":
+        res = _execute_borrow_from_bank(agent_cfg, me, req)
+    elif action == "repay_bank":
+        res = _execute_repay_bank(agent_cfg, me, req)
     elif action == "request_investment":
         res = _execute_request_investment(agent_cfg, me, req)
     elif action == "respond_investment":
@@ -2628,6 +2719,8 @@ def _event_from_result(round_no: int, res: dict,
                             "amount", "amount_min", "amount_max",
                             "desired_amount", "profit_share",
                             "principal_remaining", "target_login",
+                            "system_loan_event_id", "system_debt",
+                            "system_credit_remaining", "requested_amount",
                             "target_name", "before", "after", "delta",
                             "liked_post_ids", "already_liked_post_ids",
                             "skipped_post_ids"}}
@@ -2694,7 +2787,7 @@ def _turn_state_payload(round_no: int, total: int, step_no: int,
         payload["破产求生任务"] = broke_survival
         payload["提示"] += (
             f" 当前余额不足，不能直接预测比赛#{target.get('match_no')}；"
-            "请先用 request_investment 或 create_funding_invite 求资。"
+            "请先用 borrow_from_bank、request_investment 或 create_funding_invite 求资。"
         )
     return payload
 
@@ -2708,7 +2801,7 @@ def _mandatory_coverage_block(agent_cfg: dict, req: dict,
     if target_match_no is None:
         return None
     action = req["action"]
-    if action == "read_intel":
+    if action in {"read_intel", "borrow_from_bank", "repay_bank"}:
         return None
     if action == "place_bets":
         for bet in _batch_bets_from_req(req):
