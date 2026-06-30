@@ -16,7 +16,7 @@ from .elo import update_elo
 from .fetch import load_matches
 from .model import (effective_elo, exact_score_prob, match_probabilities,
                     score_grid, win_expectancy)
-from .tournament import GROUPS
+from .tournament import GROUPS, ROUND_OF_32, THIRD_PLACE_SLOTS
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_PREDICTION_CONFIG = {
@@ -86,6 +86,120 @@ def load_teams() -> dict[str, dict]:
 def outcome_of(score) -> str:
     gh, ga = score
     return "H" if gh > ga else ("A" if ga > gh else "D")
+
+
+def _live_group_rows(live_tables: dict, group: str) -> list[tuple[str, dict]]:
+    rows = list((live_tables.get(group) or {}).items())
+    rows.sort(key=lambda item: (
+        -item[1]["pts"],
+        -(item[1]["gf"] - item[1]["ga"]),
+        -item[1]["gf"],
+        item[0],
+    ))
+    return rows
+
+
+def _group_stage_complete(live_tables: dict) -> bool:
+    return all(
+        len(live_tables.get(g, {})) == 4
+        and all(row["played"] >= 3 for row in live_tables[g].values())
+        for g in GROUPS
+    )
+
+
+def _third_place_assignments(matches: list[dict], live_tables: dict,
+                             by_code: dict[str, dict]) -> dict[int, str]:
+    thirds = []
+    for group in GROUPS:
+        rows = _live_group_rows(live_tables, group)
+        if len(rows) >= 3:
+            code, row = rows[2]
+            thirds.append((group, code, row))
+    thirds.sort(key=lambda item: (
+        -item[2]["pts"],
+        -(item[2]["gf"] - item[2]["ga"]),
+        -item[2]["gf"],
+        item[0],
+    ))
+    qualified = [group for group, _, _ in thirds[:8]]
+
+    assignment: dict[int, str] = {}
+    for match in matches:
+        specs = ROUND_OF_32.get(match["match"])
+        if match["stage"] != "r32" or not specs:
+            continue
+        for side, spec in (("home", specs[0]), ("away", specs[1])):
+            code = match.get(side)
+            if code and spec.startswith("3:") and code in by_code:
+                assignment[match["match"]] = by_code[code]["group"]
+
+    remaining = [group for group in qualified if group not in set(assignment.values())]
+    unresolved = sorted(slot for slot in THIRD_PLACE_SLOTS if slot not in assignment)
+
+    def backtrack(i: int) -> bool:
+        if i >= len(unresolved):
+            return True
+        slot = unresolved[i]
+        for group in list(remaining):
+            if group not in THIRD_PLACE_SLOTS[slot]:
+                continue
+            assignment[slot] = group
+            remaining.remove(group)
+            if backtrack(i + 1):
+                return True
+            remaining.append(group)
+            del assignment[slot]
+        return False
+
+    if not backtrack(0):
+        for slot in unresolved:
+            if slot in assignment:
+                continue
+            pick = next((g for g in remaining if g in THIRD_PLACE_SLOTS[slot]), None)
+            if pick:
+                assignment[slot] = pick
+                remaining.remove(pick)
+    return assignment
+
+
+def _resolve_r32_slots(matches: list[dict], live_tables: dict,
+                       by_code: dict[str, dict]) -> list[dict]:
+    if not _group_stage_complete(live_tables):
+        return matches
+
+    third_assignment = _third_place_assignments(matches, live_tables, by_code)
+
+    def rank_code(group: str, rank: int) -> str | None:
+        rows = _live_group_rows(live_tables, group)
+        if 0 <= rank - 1 < len(rows):
+            return rows[rank - 1][0]
+        return None
+
+    def resolve(spec: str, match_no: int) -> str | None:
+        if spec.startswith("3:"):
+            group = third_assignment.get(match_no)
+            return rank_code(group, 3) if group else None
+        if len(spec) >= 2 and spec[0] in {"1", "2"} and spec[1] in GROUPS:
+            return rank_code(spec[1], int(spec[0]))
+        return None
+
+    out = []
+    for match in matches:
+        row = dict(match)
+        specs = ROUND_OF_32.get(row["match"])
+        if row["stage"] == "r32" and specs:
+            for side, slot_key, spec in (
+                ("home", "slot_home", specs[0]),
+                ("away", "slot_away", specs[1]),
+            ):
+                expected = resolve(spec, row["match"])
+                if expected and not row.get(side):
+                    row[side] = expected
+                    row[slot_key] = None
+                elif expected and row.get(side) == expected:
+                    row[slot_key] = None
+        out.append(row)
+    return out
 
 
 def _normalize_probs(probs: dict) -> dict:
@@ -372,6 +486,27 @@ def build_state(write_side_effects: bool = True) -> dict:
             t["open"] = min(max(t.get("open", 1.0) * ratio ** OPEN_UPDATE_K,
                                 OPEN_MIN), OPEN_MAX)
 
+    # ---- 小组实时积分表 ----
+    live_tables = {g: {} for g in GROUPS}
+    for code, t in by_code.items():
+        live_tables[t["group"]][code] = {"pts": 0, "gf": 0, "ga": 0, "played": 0}
+    for m in played:
+        if m["stage"] != "group":
+            continue
+        gh, ga = m["score"]
+        th = live_tables[by_code[m["home"]]["group"]][m["home"]]
+        ta = live_tables[by_code[m["away"]]["group"]][m["away"]]
+        th["gf"] += gh; th["ga"] += ga; th["played"] += 1
+        ta["gf"] += ga; ta["ga"] += gh; ta["played"] += 1
+        if gh > ga:
+            th["pts"] += 3
+        elif ga > gh:
+            ta["pts"] += 3
+        else:
+            th["pts"] += 1; ta["pts"] += 1
+
+    matches = _resolve_r32_slots(matches, live_tables, by_code)
+
     # ---- 市场回报系数融合：为未赛对阵生成/刷新锁定预测 ----
     from datetime import datetime, timezone
     now_utc = datetime.now(timezone.utc)
@@ -446,25 +581,6 @@ def build_state(write_side_effects: bool = True) -> dict:
                   else m["winner"])  # 平局须由 winner 字段给出点球胜者
         if winner:
             ko_winners[m["match"]] = winner
-
-    # ---- 小组实时积分表 ----
-    live_tables = {g: {} for g in GROUPS}
-    for code, t in by_code.items():
-        live_tables[t["group"]][code] = {"pts": 0, "gf": 0, "ga": 0, "played": 0}
-    for m in played:
-        if m["stage"] != "group":
-            continue
-        gh, ga = m["score"]
-        th = live_tables[by_code[m["home"]]["group"]][m["home"]]
-        ta = live_tables[by_code[m["away"]]["group"]][m["away"]]
-        th["gf"] += gh; th["ga"] += ga; th["played"] += 1
-        ta["gf"] += ga; ta["ga"] += gh; ta["played"] += 1
-        if gh > ga:
-            th["pts"] += 3
-        elif ga > gh:
-            ta["pts"] += 3
-        else:
-            th["pts"] += 1; ta["pts"] += 1
 
     n = len(records)
     return {

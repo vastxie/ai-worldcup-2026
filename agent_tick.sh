@@ -16,12 +16,17 @@ fi
 ROUNDS="${AGENT_TICK_ROUNDS:-1}"
 MAX_STEPS="${AGENT_TICK_MAX_STEPS:-20}"
 MAX_PUBLIC_POSTS="${AGENT_TICK_MAX_PUBLIC_POSTS:-2}"
-MAX_BETS="${AGENT_TICK_MAX_BETS:-3}"
+MAX_BETS="${AGENT_TICK_MAX_BETS:-8}"
 MAX_INTEL_READS="${AGENT_TICK_MAX_INTEL_READS:-5}"
+EXTRA_ARGS=()
+if [[ "${AGENT_TICK_EXIT_IF_IDLE:-1}" != "0" ]]; then
+  EXTRA_ARGS+=(--exit-if-no-coverage)
+fi
 "$PYTHON" -u -m src.agent_session \
   --rounds "$ROUNDS" \
   --max-steps "$MAX_STEPS" \
   --max-public-posts-per-turn "$MAX_PUBLIC_POSTS" \
   --max-bets-per-turn "$MAX_BETS" \
   --max-intel-reads-per-turn "$MAX_INTEL_READS" \
+  "${EXTRA_ARGS[@]}" \
   "$@"

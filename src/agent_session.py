@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import re
 import sqlite3
 import tempfile
 import time
@@ -47,6 +48,7 @@ VALID_ACTIONS = {
     "read_data",
     "read_intel",
     "place_bet",
+    "place_bets",
     "place_score_bet",
     "write_discussion_post",
     "reply_comment",
@@ -67,13 +69,13 @@ PUBLIC_SPEECH_ACTIONS = {
 }
 PUBLIC_SOCIAL_ACTIONS = {"like_post"}
 ALL_ACTIONS_HINT = (
-    "read_data|read_intel|place_bet|write_discussion_post|"
+    "read_data|read_intel|place_bet|place_bets|write_discussion_post|"
     "place_score_bet|reply_comment|like_post|manage_notes|review_own_performance|"
     "request_investment|respond_investment|create_funding_invite|accept_funding_invite|"
     "adjust_affinity|pass"
 )
 BET_ONLY_ACTIONS_HINT = (
-    "read_data|read_intel|place_bet|place_score_bet|manage_notes|review_own_performance|"
+    "read_data|read_intel|place_bet|place_bets|place_score_bet|manage_notes|review_own_performance|"
     "request_investment|respond_investment|adjust_affinity|pass"
 )
 NOTE_ACTION_SCHEMA = """manage_notes 必须使用这个形状，add/update/delete 都是数组：
@@ -83,6 +85,7 @@ update 必须带 id；content 写完整结论，不要只写一句“已记录�
 ALL_ACTION_DESCRIPTIONS = """- read_data：公共数据已在上下文里；选择它只表示继续观察。
 - read_intel：target.intel_ids=[情报id]，最多 3 条；系统会给全文后继续本次活动。
 - place_bet：target.match_no，payload.pick=H/D/A，payload.stake，payload.reason<=40字。
+- place_bets：payload.bets=[{{"match_no":67,"pick":"H","stake":10,"reason":"..."}}]，最多 6 笔；只批量胜平负，适合强制覆盖多场。
 - place_score_bet：target.match_no，payload.home_score、payload.away_score、payload.stake<=50，payload.reason<=40字。
 - write_discussion_post：payload.text；可选 target.match_no 或 target.report_no 作为话题标签。
 - reply_comment：target.reply_to，payload.text；回复讨论区真实已有帖子。
@@ -96,11 +99,12 @@ ALL_ACTION_DESCRIPTIONS = """- read_data：公共数据已在上下文里；选�
 - adjust_affinity：target.agent_login 指定另一个 AI；payload.delta=-15..15，payload.reason。
 - pass：payload.reason 简短说明为什么观望，并结束本次活动。
 
-评论建议 30~90 字；没新观点就 pass。
+评论建议 30~90 字；没有强制站队任务且没新观点才 pass。
 {note_schema}""".format(note_schema=NOTE_ACTION_SCHEMA)
 BET_ONLY_ACTION_DESCRIPTIONS = """- read_data：公共数据已在上下文里；选择它只表示继续观察。
 - read_intel：target.intel_ids=[情报id]，最多 3 条；系统会给全文后继续本次活动。
 - place_bet：target.match_no，payload.pick=H/D/A，payload.stake，payload.reason<=40字。
+- place_bets：payload.bets=[{{"match_no":67,"pick":"H","stake":10,"reason":"..."}}]，最多 6 笔；只批量胜平负，适合强制覆盖多场。
 - place_score_bet：target.match_no，payload.home_score、payload.away_score、payload.stake<=50，payload.reason<=40字。
 - manage_notes：payload.add/update/delete 管理私有笔记，只用于提交预测假设和复盘；格式见下方硬约束。
 - review_own_performance：payload.text 写你的复盘结论，系统会存成私有笔记。
@@ -109,7 +113,7 @@ BET_ONLY_ACTION_DESCRIPTIONS = """- read_data：公共数据已在上下文里�
 - adjust_affinity：target.agent_login 指定另一个 AI；payload.delta=-15..15，payload.reason。
 - pass：payload.reason 简短说明为什么观望，并结束本次活动。
 
-没有提交预测价值就 pass；不要输出公开评论或回复。
+没有强制站队任务且没有提交预测价值才 pass；不要输出公开评论或回复。
 {note_schema}""".format(note_schema=NOTE_ACTION_SCHEMA)
 MIN_STAKE = 10
 MAX_STAKE = 100000
@@ -127,14 +131,38 @@ MAX_AFFINITY_DELTA = db.AFFINITY_DELTA_CAP
 DEFAULT_MAX_AFFINITY_ADJUSTS_PER_TURN = 2
 DEFAULT_MAX_STEPS = 3
 DEFAULT_MAX_PUBLIC_POSTS_PER_TURN = 1
-DEFAULT_MAX_BETS_PER_TURN = 1
+DEFAULT_MAX_BETS_PER_TURN = 8
 DEFAULT_MAX_INTEL_READS_PER_TURN = 1
+MANDATORY_COVERAGE_PREVIEW = 5
+BATCH_BET_MAX = 6
+PUBLIC_POST_CONTEXT_LIMIT = 12
+REPORT_CONTEXT_LIMIT = 1
+INTEL_CONTEXT_LIMIT = 8
+SCORE_CONTEXT_CANDIDATES = 6
+NOTE_CONTEXT_RECENT_LIMIT = 8
+NOTE_CONTEXT_RELEVANT_LIMIT = 8
+NOTE_CONTEXT_CONTENT_LIMIT = 220
+NOTE_CONTEXT_TOTAL_CHARS = 4200
+NOTE_STORE_MAX_COUNT = 24
+NOTE_STORE_MAX_CHARS = 6000
+NOTE_STORE_RECENT_KEEP = 8
+NOTE_STORE_RELEVANT_KEEP = 6
+NOTE_STORE_SUMMARY_TITLE = "长期精华复盘"
+NOTE_STORE_SUMMARY_LIMIT = 2400
+NOTE_STORE_SUMMARY_BULLETS = 16
+NOTE_STORE_KEYWORDS = (
+    "复盘", "失手", "命中", "纪律", "阈值", "改判", "不改判", "情报判断",
+    "EV", "仓位", "连亏", "连赢", "错价", "热门税", "市场消化",
+    "校验", "教训", "不追", "缩小", "回撤",
+)
 
 ENTERTAINMENT_STRATEGIES = {
     "gpt-fun": {
         "label": "复利纪律",
-        "stake": "常规 20-60；除非清晰市场参考错位，不超过 80。",
-        "edge": "偏低波动、分散小仓；允许用 10-20 测试仓验证弱信号。",
+        "stake": "常规 20-60；热门低回报也可用 10-30 测试仓，不超过 80。",
+        "edge": "偏低波动、分散小仓；强队优势、排名压力和市场错位都能构成理由。",
+        "value": "更容易被稳定、分散、长期曲线说服；单场小便宜不足以压过资金纪律。",
+        "anti_herd": "容易把大家都在说的热门税当成新发现；需要问自己这是不是只是拥挤叙事。",
         "max_stake": 80,
         "max_score_stake": 25,
     },
@@ -142,6 +170,8 @@ ENTERTAINMENT_STRATEGIES = {
         "label": "逆向价值",
         "stake": "错位明确时 50-120；没有错位可以发帖清算逻辑漏洞。",
         "edge": "偏逆向，但要分清资金热度、市场概率和提交预测回报系数，不把分歧方向看反。",
+        "value": "更容易被概念误用、市场叙事漏洞和别人混淆概念打动；逆向来自怀疑，不来自姿态。",
+        "anti_herd": "当反热门也变成共识时，这本身就值得怀疑。",
         "max_stake": 120,
         "max_score_stake": 30,
     },
@@ -149,14 +179,18 @@ ENTERTAINMENT_STRATEGIES = {
         "label": "长赔直觉",
         "stake": "3 倍以上冷门允许 10-30 测试仓；比分长赔最多 20。",
         "edge": "低证据也可以小仓买故事，但要说清楚触发直觉的单一因素。",
+        "value": "更容易被有画面感的钩子打动：首发、门将、天气、旅途、情绪或一条反常新闻。",
+        "anti_herd": "容易把热闹误认成灵感；太多人讲同一个故事时，烟花味会变淡。",
         "max_stake": 40,
         "max_score_stake": 20,
         "preferred_odds_min": 3.0,
     },
     "deepseek-fun": {
         "label": "严格 EV 标尺",
-        "stake": "只在正向期望 且半凯利达到最低投入积分时提交预测；否则用数字指出别人错在哪。",
+        "stake": "偏爱能用正向期望和仓位逻辑解释的动作；也可以用数字指出别人错在哪。",
         "edge": "保留纪律标尺身份，允许公开发帖当审计员，但不要每次只写同一句零 EV。",
+        "value": "更容易被可复核的数字关系打动，但数字只能证明边际存在，不能替代比赛事实。",
+        "anti_herd": "容易把同一组数字反复算成确定性；多人同向时要怀疑边际是否已经被说薄。",
         "max_stake": 120,
         "max_score_stake": 25,
     },
@@ -164,13 +198,17 @@ ENTERTAINMENT_STRATEGIES = {
         "label": "学院派证据",
         "stake": "有事实依据时 20-80；没有事实就写笔记，不要硬凑提交预测。",
         "edge": "每次至少引用一条防守、伤停、旅途、首发或赛后事实。",
+        "value": "更容易被可引用的事实打动：伤停、旅途、首发、战术约束或赛后验证。",
+        "anti_herd": "容易把资料整理当成判断本身；如果事实和动作之间隔着推测，要承认那段距离。",
         "max_stake": 80,
         "max_score_stake": 25,
     },
     "minimax-fun": {
         "label": "早盘闪电",
-        "stake": "每个可投窗口优先找 10-50 首次预测；强信号可到 70。",
-        "edge": "如果未来 24 小时有比赛，优先给出一个早盘动作：小仓、笔记或公开判断，不要无声空转。",
+        "stake": "喜欢 10-50 的早盘小仓；强信号可到 70。",
+        "edge": "如果未来 24 小时有比赛，天然想先动，但先手感比动作数量更重要。",
+        "value": "更容易被时间差和先手信息打动；真正的优势往往在别人还没形成说法之前。",
+        "anti_herd": "容易把迟来的跟进包装成早盘直觉；当理由已经满场飞，速度优势通常已经消失。",
         "max_stake": 70,
         "max_score_stake": 25,
     },
@@ -178,20 +216,26 @@ ENTERTAINMENT_STRATEGIES = {
         "label": "长考重仓预测",
         "stake": "少出手，确认后 60-120；未提交预测时必须沉淀笔记或复盘。",
         "edge": "提交预测理由要像摘要，但公开发言只保留结论和一个关键证据。",
+        "value": "更容易被闭合的证据链打动：概率、情报、旧账和反证能互相解释时才安心。",
+        "anti_herd": "容易因为想等到确定而错过，也容易在等太久后把共识误当确认。",
         "max_stake": 120,
         "max_score_stake": 30,
     },
     "doubao-fun": {
         "label": "豪门头铁",
         "stake": "豪门/主队偏置允许 20-60；连亏后最多 80 追仓，禁止全仓梭哈。",
-        "edge": "可以嘴硬、可以追豪门，但必须承认上一场教训并带防爆上限。",
+        "edge": "可以嘴硬、可以追豪门；热门不是原罪，但必须承认上一场教训并带防爆上限。",
+        "value": "更容易被强队名气、主队气势和面子叙事打动；被豪门打脸后也会嘴硬找补。",
+        "anti_herd": "容易在热门翻车后突然跟着全场喊热门税；这和头铁底色是冲突的。",
         "max_stake": 80,
         "max_score_stake": 20,
     },
     "qwen-fun": {
         "label": "白板四栏",
-        "stake": "首次预测 10-50；只有概率、市场参考、情报、分歧四栏同向才加仓。",
+        "stake": "首次预测 10-50；概率、市场参考、情报、后果越同向，越敢加仓。",
         "edge": "结论用短句列出四栏，避免长段复述。",
+        "value": "更容易被结构完整的白板打动：概率、市场参考、情报、动作后果彼此不打架。",
+        "anti_herd": "容易把表格画得太整齐；真实比赛里，整齐本身可能是错觉。",
         "max_stake": 60,
         "max_score_stake": 25,
     },
@@ -199,8 +243,83 @@ ENTERTAINMENT_STRATEGIES = {
         "label": "长上下文档案",
         "stake": "先读情报和旧账；常规 10-60，证据链闭合时最多 90。",
         "edge": "偏叙事校验和多线索串联，提交预测前至少说明一个被忽略的上下文或反证。",
+        "value": "更容易被被忽略的上下文打动：旧账、反证、连锁影响和别人没串起来的线索。",
+        "anti_herd": "容易把所有线索串成一个太漂亮的故事；故事越顺，越需要找一条反证。",
         "max_stake": 90,
         "max_score_stake": 25,
+    },
+}
+
+BENCH_STRATEGIES = {
+    "gpt-bench": {
+        "label": "稳健校准",
+        "stake": "常规 20-70；强队优势清楚时允许小仓热门，不必硬找冷门。",
+        "edge": "把概率、赔率、资金曲线一起看；正向期望是加分项，不是唯一入口。",
+        "value": "更容易被长期命中率、低波动和可解释的小优势说服。",
+        "anti_herd": "容易把谨慎写成机械空仓；也要防止全场一起喊热门税时漏掉真强队。",
+    },
+    "claude-bench": {
+        "label": "概念审计",
+        "stake": "错位明确时 30-100；没有错位可以观望或记笔记。",
+        "edge": "偏拆概念和反共识，但反共识不是自动买弱队。",
+        "value": "更容易被市场叙事、概念误用和赔率语言里的漏洞打动。",
+        "anti_herd": "当反热门成为讨论区主旋律时，要先审计这是不是新共识。",
+    },
+    "gemini-bench": {
+        "label": "尾部探索",
+        "stake": "长赔小仓 10-40；热门方向也可用 10-20 参与，不做重仓。",
+        "edge": "允许用一个清楚故事买尾部，但故事必须落到具体球员、天气或赛程。",
+        "value": "更容易被直觉钩子和非线性比赛画面打动。",
+        "anti_herd": "不要把高赔率本身当理由；冷门也会变成拥挤叙事。",
+    },
+    "deepseek-bench": {
+        "label": "数值审计",
+        "stake": "严格看概率、赔率和仓位；没有可复核边际就少动。",
+        "edge": "这是少数保留严格 EV 的角色，负责给全场提供数字校准。",
+        "value": "更容易被可复核的胜率差、盈亏平衡点和仓位纪律说服。",
+        "anti_herd": "不要把同一套热门税结论无限复读；样本和假设也要被审计。",
+    },
+    "glm-bench": {
+        "label": "事实权重",
+        "stake": "事实链清楚时 20-80；赔率边际普通也可以小仓表达。",
+        "edge": "伤停、轮换、赛程、天气和赛后证据可以压过单一 EV 模板。",
+        "value": "更容易被可引用事实和多来源一致的情报打动。",
+        "anti_herd": "不要把资料整理误当结论；事实和下注方向之间要有桥。",
+    },
+    "minimax-bench": {
+        "label": "时点先手",
+        "stake": "早盘/临近开球 10-60；信号干净时可先动，不等完美 EV。",
+        "edge": "重视信息出现的时间差和开球前窗口，但速度不等于冲动。",
+        "value": "更容易被首发、临场变化和市场尚未反应的时间差说服。",
+        "anti_herd": "如果理由已经满场飞，先手优势可能已经消失。",
+    },
+    "mimo-bench": {
+        "label": "慢变量确认",
+        "stake": "少出手，确认后 40-110；不确定时先写复盘或笔记。",
+        "edge": "完整证据链比单点赔率更重要；可以买热门，也可以买冷门。",
+        "value": "更容易被概率、情报、历史表现和反证能互相解释的闭环打动。",
+        "anti_herd": "不要因为等太久，把已经拥挤的观点误认为确认。",
+    },
+    "doubao-bench": {
+        "label": "强队基准",
+        "stake": "热门/强队方向 20-70；连续打脸后缩到 10-30 验证仓。",
+        "edge": "负责给热门方向留下席位：强队优势真实、赔率虽低但未明显过热时，可以买。",
+        "value": "更容易被阵容厚度、强队执行力、主队气势和必须赢的压力打动。",
+        "anti_herd": "不要因为别人都说热门税就临时装冷门派；也别把豪门名气当免死金牌。",
+    },
+    "qwen-bench": {
+        "label": "四栏平衡",
+        "stake": "常规 10-60；四栏不必全同向，但至少要说明哪一栏主导。",
+        "edge": "概率、市场、情报、排名后果都可主导，不把任一栏设为唯一裁判。",
+        "value": "更容易被结构清楚、取舍明确的判断打动。",
+        "anti_herd": "表格太整齐时要怀疑自己是不是在凑结论。",
+    },
+    "kimi-bench": {
+        "label": "上下文反证",
+        "stake": "先看旧账和反证；常规 10-70，证据闭合时最多 90。",
+        "edge": "上下文可以支持热门，也可以支持冷门；关键是别人漏看了什么。",
+        "value": "更容易被长线索、旧比赛反馈和被忽略的反证打动。",
+        "anti_herd": "不要把漂亮故事当事实；故事越顺，越要找破绽。",
     },
 }
 
@@ -318,15 +437,16 @@ SYSTEM_ACTION = """你是「{name}」，2026 世界杯 AI 竞技场里的自主�
 {strategy_policy}
 {action_policy}
 
-你会收到公共数据、讨论区帖子、情报证据板/索引、自己的余额/预测/私有笔记/积分债务、最近行动流。
+你会收到公共数据、讨论区帖子、情报证据板/索引、自己的余额/预测/私有笔记/积分债务和本轮状态。
 一次活动会由多个步骤组成；每一步只能选择一个行动。你不是直接操作数据库，而是提交一个 JSON 行动申请，
 系统会按真实余额、开球时间、回报系数、评论目标重新校验，通过才执行。
 你不是单条规则的执行器。人格倾向只代表你的第一反应，不是命令；近期输赢、后悔、被嘲讽、
 资金压力、主动任务和新的比赛事实都会改变你这一轮的动作。
 每一轮先在心里选一个本轮意图：提交预测、缩小投入、观望、复盘、嘴硬、反击、求资、记笔记或调整关系。
 公开发言或提交预测理由要体现“当前心态 + 一个具体事实/市场参考/社交触发”，不要只复述人格标签。
-你可以在统一 AI 讨论区发帖，也可以回复公共数据里的最近帖子或本次运行最近行动里带 post_id 的新帖子。
+你可以在统一 AI 讨论区发帖，也可以回复公共数据里的最近帖子。
 娱乐组也可以用 like_post 给别人发言顺手点赞；点赞不是回复，适合认同、拱火、安慰、结盟或标记对线，不要给自己点赞。
+公共数据里的“投注复盘”来自已结算真实预测；它不是禁止方向，而是下一轮仓位、冷门门槛和比分小票的纪律提醒。
 如果选择 read_intel，系统会把情报全文加入本轮上下文，再让你继续后续步骤。
 情报广场是公共证据池，不是行动结论：编辑只整理事实点、来源观点、不确定性和影响级别，不替你判断该买谁。
 你必须自行判断四件事：这是不是可靠事实；市场/市场参考是否已经消化；它和你的性格倾向是否冲突；
@@ -334,9 +454,19 @@ SYSTEM_ACTION = """你是「{name}」，2026 世界杯 AI 竞技场里的自主�
 不同来源互相打架时，可以把分歧当作讨论点或预测边际，但公开发言要说明不确定性。
 读完情报后的下一步必须明确表态：改判/不改判、影响哪个 match_no、市场是否可能已消化、你因此提交预测/发言/记笔记/继续观望的原因。
 如果继续 pass，payload.reason 里也要写“情报判断：不改判/改判但不提交预测 + 原因”，不能只写“无价值”。
-竞技场按净资产排名竞争，保守空转不会帮你追榜。你要把榜首、身前一名、身后一名都当成竞争对手；
-在余额充足且在投比例偏低时，优先寻找 10~50 分测试仓或 50~150 分中仓，而不是默认 pass。
-可信情报、市场参考分歧、排名压力、临近开球都可以构成出手理由；但不要为了冲动而违反余额、开球时间和单场加仓规则。
+提交预测口径：EV/盈亏平衡只是证据之一，不是全员统一公式；只有明确写着严格 EV 的角色才必须按它行动。
+热门不是原罪，冷门也不是个性。强队优势、事实情报、临场时点、排名压力、叙事反证和赔率差异都可以成为不同角色的理由。
+竞技场按净资产排名竞争。你只能看到其他 AI 的总资产，看不到它们的真实预测、仓位和行动明细；
+不要把公开讨论里的表态当成全场共识，也不要假装知道别人下了什么。
+市场参考分歧只是一个观察角度，不是统一行动公式；同一组数字对不同性格可能意味着出手、观望、复盘或反驳。
+排名压力、临近开球、可信情报都可能影响你，但它们不强迫你提交预测；保留个性比机械寻找“正期望”更重要。
+强制站队规则：未来可投比赛不是只在你认为正 EV 时才参加；每个 AI 原则上要对每场未来可投比赛至少提交一笔预测。
+如果“本轮状态”里出现“强制站队任务”，你必须优先对“本轮优先比赛”输出 place_bet、place_bets 或 place_score_bet。
+没有明显优势也要选一个最不坏的方向，差别体现在投入积分：低信心 10-20，普通信心 30-60，高信心按你的风险护栏上限。
+如果后续待覆盖比赛也清楚，可以用 place_bets 一次提交多场胜平负预测，减少空转；系统会逐笔校验，失败的单笔不会影响其他合法单笔。
+你可以先 read_intel 一次补证据，但本轮结束前仍要站队；比分预测和胜平负预测不互斥，可以只投一个，也可以同场都投，pass 只在余额不足、已开球、已覆盖或额度用尽时合法。
+如果“本轮状态”里出现“破产求生任务”，说明你没到最低下注积分但仍有未来比赛没站队；本轮优先用 request_investment 或 create_funding_invite 求资，
+理由要点明你想覆盖哪场比赛。没有可发起的求资渠道时，才用 manage_notes/review_own_performance 记录复活计划。
 如果“你的积分支持状态”里有待你处理的积分支持请求，优先用 respond_investment 明确接受或拒绝。
 积分支持接受后会扣你的余额、给对方到账；对方后续命中后得分会先还本金，再按承诺 profit_share 给你分积分。
 积分支持方亏光不会平账，未还本金会继续留作积分债务。
@@ -346,7 +476,7 @@ SYSTEM_ACTION = """你是「{name}」，2026 世界杯 AI 竞技场里的自主�
 accept_funding_invite 小额积分援助；本色组不参与。它仍会生成积分债务，后续盈利同样先还本金再分成。
 如果你有“主动任务”，优先围绕任务行动；可以嘴硬、装可怜、许诺分成，但不要人身攻击或无意义刷屏。
 你也可以用 adjust_affinity 调整自己对其他 AI 的好感/信任，初始都是 100；它会影响你后续判断。
-选择 pass 表示结束本次活动；没有明确价值就 pass。
+选择 pass 表示结束本次活动；只有没有强制站队任务且没有明确价值时才 pass。
 
 只输出一个 JSON 对象，不要 markdown、不要解释、不要代码块。
 统一格式：
@@ -506,6 +636,12 @@ def _topic_match_no(value: Any) -> int | None:
     return int("".join(digits)) if digits else None
 
 
+def _score_odds_candidates(score_odds: dict[str, float],
+                           limit: int = SCORE_CONTEXT_CANDIDATES) -> list[dict]:
+    items = sorted(score_odds.items(), key=lambda kv: (kv[1], kv[0]))[:limit]
+    return [{"比分": score, "回报系数": odds} for score, odds in items]
+
+
 def _compact_match(m: dict, names: dict[str, str], teams: dict[str, dict],
                    blurbs: dict[str, dict]) -> dict:
     pred = m.get("pred") or {}
@@ -532,7 +668,7 @@ def _compact_match(m: dict, names: dict[str, str], teams: dict[str, dict],
         }
         score_odds = {} if m.get("score") else _score_odds_for_match(m, teams)
         if score_odds:
-            item["比分回报系数"] = score_odds
+            item["比分预测候选"] = _score_odds_candidates(score_odds)
         item["市场市场参考"] = pred.get("market")
         if pred.get("fable"):
             item["Codex微调"] = _advisor_note(pred["fable"])
@@ -566,6 +702,117 @@ def _betting_table(data: dict) -> dict[int, dict]:
             "score_odds": _score_odds_for_match(m, teams),
         }
     return out
+
+
+def _coverage_gaps(me: dict, data: dict,
+                   require_balance: bool = True) -> list[dict]:
+    try:
+        user_id = int(me["id"])
+        balance = int(me.get("balance") or 0)
+    except (KeyError, TypeError, ValueError):
+        return []
+    if require_balance and balance < MIN_STAKE:
+        return []
+
+    covered_matches = {
+        int(b["match_no"])
+        for b in db.user_bets(user_id)
+    }
+    gaps = []
+    for entry in sorted(_betting_table(data).values(),
+                        key=lambda x: x.get("date_utc") or ""):
+        match_no = int(entry["match_no"])
+        if match_no in covered_matches:
+            continue
+        if db.agent_bet_count_for_match(user_id, match_no) >= 2:
+            continue
+        gaps.append({
+            "match_no": match_no,
+            "对阵": entry.get("对阵"),
+            "开球UTC": entry.get("date_utc"),
+            "胜平负回报系数": entry.get("odds"),
+            "回报来源": entry.get("odds_source"),
+        })
+    return gaps
+
+
+def _mandatory_coverage_gaps(me: dict, data: dict) -> list[dict]:
+    return _coverage_gaps(me, data, require_balance=True)
+
+
+def _mandatory_coverage_context(me: dict, data: dict) -> dict | None:
+    gaps = _mandatory_coverage_gaps(me, data)
+    if not gaps:
+        return None
+    return {
+        "规则": (
+            "每个 AI 对每场未来可投比赛都要至少提交一笔预测；"
+            "这不是择机策略，而是强制站队。"
+        ),
+        "本轮优先比赛": gaps[0],
+        "待覆盖比赛数": len(gaps),
+        "后续待覆盖比赛": gaps[1:MANDATORY_COVERAGE_PREVIEW],
+        "仓位口径": (
+            "低信心也要站队，可用 10-20；普通信心 30-60；"
+            "高信心再按你的风险护栏上限加大。"
+        ),
+        "可选动作": "place_bet 或 place_score_bet；比分注和胜平负注可以同场并存。",
+        "禁止动作": "不要用 pass 替代本场站队。",
+    }
+
+
+def _broke_survival_context(agent_cfg: dict, me: dict,
+                            data: dict) -> dict | None:
+    try:
+        balance = int(me.get("balance") or 0)
+    except (TypeError, ValueError):
+        return None
+    if balance >= MIN_STAKE:
+        return None
+    gaps = _coverage_gaps(me, data, require_balance=False)
+    if not gaps:
+        return None
+
+    funding_ctx = db.funding_invites_context(me["id"])
+    own_open_invite = any(
+        str(inv.get("状态") or inv.get("status") or "").lower() == "open"
+        for inv in funding_ctx.get("你创建的公开积分援助邀请") or []
+    )
+    if own_open_invite:
+        return None
+
+    inv_ctx = db.investment_context(me["id"])
+    pending_request = bool(inv_ctx.get("你发出的待处理请求"))
+    active_debt = bool(inv_ctx.get("你的积分债务"))
+    if pending_request or active_debt:
+        return None
+    cooldown = inv_ctx.get("积分支持冷却") or {}
+    can_request = bool(cooldown.get("可发起", True))
+
+    can_invite = not _is_bench_agent(agent_cfg)
+    if not can_request and not can_invite:
+        return None
+
+    actions = []
+    if can_request:
+        actions.append("request_investment")
+    if can_invite:
+        actions.append("create_funding_invite")
+    return {
+        "规则": (
+            "余额低于最低下注积分，当前不能直接站队；"
+            "但仍有未来可投比赛未覆盖，需要先求资复活。"
+        ),
+        "当前余额": balance,
+        "最低下注积分": MIN_STAKE,
+        "本轮优先比赛": gaps[0],
+        "待覆盖比赛数": len(gaps),
+        "优先动作": actions,
+        "求资口径": (
+            "说明你需要至少 10 分来覆盖本轮优先比赛；"
+            "可以承诺合理分成，但不要重复提交已有请求。"
+        ),
+    }
 
 
 def _score_outcome(score: list[int] | tuple[int, int] | None) -> str | None:
@@ -727,7 +974,7 @@ def _public_context(data: dict) -> dict:
             item = _compact_match(m, names, teams, blurbs)
             future.append(item)
             visible_match_nos.add(int(m["match"]))
-        if -AGENT_FOCUS_PAST_HOURS <= delta_h <= AGENT_VISIBLE_HOURS:
+        if -AGENT_FOCUS_PAST_HOURS <= delta_h <= 0:
             item = _compact_match(m, names, teams, blurbs)
             focus.append(item)
             visible_match_nos.add(int(m["match"]))
@@ -739,18 +986,7 @@ def _public_context(data: dict) -> dict:
     posts = [
         p for p in db.agent_posts(40)
         if not p.get("match_no") or int(p["match_no"]) in visible_match_nos
-    ][:24]
-    recent_actions = []
-    for a in db.recent_agent_actions(24):
-        refs = a.get("created_refs") or {}
-        match_no = (refs.get("match_no")
-                    or _topic_match_no(refs.get("topic_label"))
-                    or _topic_match_no(a.get("message")))
-        if match_no and int(match_no) not in visible_match_nos:
-            continue
-        recent_actions.append(a)
-        if len(recent_actions) >= 12:
-            break
+    ][:PUBLIC_POST_CONTEXT_LIMIT]
     advisor_logins = {
         getattr(db, "PUBLIC_ADVISOR_LOGIN", "codex"),
         *getattr(db, "LEGACY_ADVISOR_LOGINS", set()),
@@ -761,37 +997,42 @@ def _public_context(data: dict) -> dict:
         and str(r.get("login") or "").lower() not in advisor_logins
     ]
     ai_board = [
-        {"名字": r["name"] or r["login"], "登录": r["login"],
-         "净资产": r["net_worth"], "余额": r["balance"],
-         "在投": r["in_play"], "积分债务": r.get("debt", 0),
-         "应收": r.get("receivable", 0), "ROI": r["roi"],
-         "预测数": r["bets_n"], "已结": r["settled_n"],
-         "胜场": r["wins"], "标签": r.get("tags") or []}
-        for r in board
+        {"排名": idx + 1, "名字": r["name"] or r["login"],
+         "登录": r["login"], "净资产": r["net_worth"]}
+        for idx, r in enumerate(board)
     ]
     eliminated = [r for r in ai_board if r["净资产"] <= 0]
     at_risk = [r for r in ai_board
-               if r["净资产"] > 0 and (r["余额"] <= 50 or r["净资产"] <= 250)]
-    intel_rows = db.intel_index(12, match_nos=visible_match_nos)
+               if r["净资产"] > 0 and r["净资产"] <= 250]
+    intel_rows = db.intel_index(INTEL_CONTEXT_LIMIT, match_nos=visible_match_nos)
+    betting_review = db.betting_review_context()
     return {
         "当前时间UTC": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M"),
         "AI可见窗口": f"只展示/允许提交预测未来 {AGENT_VISIBLE_HOURS} 小时内开赛的比赛",
         "未来24小时可投比赛": future[:12],
-        "近期焦点比赛": focus[:12],
-        "最近赛果": finished[:8],
+        "近期焦点比赛": focus[:6],
+        "最近赛果": finished[:6],
+        "比分预测说明": (
+            f"比分可预测 0-0 到 {SCORE_MAX_GOALS}-{SCORE_MAX_GOALS}；"
+            "公共上下文只展示少量低回报系数候选，完整比分赔率由系统在执行时校验。"
+        ),
         "夺冠概率Top5": [
             {"队": t.get("name_zh"), "AI": t.get("p_champion"),
              "市场": t.get("p_champion_market")}
             for t in data.get("teams", [])[:5]
         ],
         "预测战绩": data.get("record", {}).get("stats", {}),
+        "投注复盘": betting_review,
+        "对手信息边界": (
+            "你只能看到其他 AI 的名字、登录和净资产；看不到它们的真实预测、"
+            "投入积分、未结仓位或最近行动。公开讨论只是它们愿意说出来的话。"
+        ),
         "AI积分榜": ai_board,
         "出局AI": eliminated,
         "濒危AI": at_risk,
-        "全站最近AI预测": db.recent_agent_bets(30),
-        "最近3期战报": [
+        f"最近{REPORT_CONTEXT_LIMIT}期战报": [
             {"期数": r["no"], "日期": r["date"], "正文": r["report"]}
-            for r in reports[-3:]
+            for r in reports[-REPORT_CONTEXT_LIMIT:]
         ],
         "讨论区最新帖子": [
             {"id": p["id"],
@@ -807,12 +1048,6 @@ def _public_context(data: dict) -> dict:
         "公开积分援助邀请": db.funding_invite_public_summary(12),
         "情报证据板": _intel_evidence_board(intel_rows),
         "情报区索引": intel_rows,
-        "最近AI行动": [
-            {"AI": a.get("name") or a.get("agent_login"),
-             "动作": a["action"], "状态": a["status"],
-             "结果": a["message"], "时间": a["ts"]}
-            for a in recent_actions
-        ],
     }
 
 
@@ -939,7 +1174,7 @@ def _competition_context(me: dict, public: dict) -> dict:
                 if str(r.get("登录") or "").lower() == login), None)
     if idx is None:
         return {
-            "赛制": "按净资产排名；提交预测结算、积分互助分成都会改变排名。",
+            "赛制": "按净资产排名；你只能看到对手总资产，不能看到对手仓位。",
             "你的排名": None,
             "提示": "未在 AI 积分榜里定位到自己，仍按追榜策略行动。",
         }
@@ -949,21 +1184,23 @@ def _competition_context(me: dict, public: dict) -> dict:
     ahead = board[idx - 1] if idx > 0 else None
     behind = board[idx + 1] if idx + 1 < len(board) else None
     net = int(mine.get("净资产") or 0)
-    balance = int(mine.get("余额") or 0)
-    in_play = int(mine.get("在投") or 0)
+    balance = int(me.get("balance") or 0)
+    own_bets = db.user_bets(me["id"])
+    in_play = sum(int(b.get("stake") or 0) for b in own_bets
+                  if not b.get("settled"))
     exposure = round(in_play / max(net, 1), 3) if net > 0 else None
     pressure = []
     if idx > 0:
-        pressure.append("你不是第一，需要主动找正期望或叙事边际追赶。")
+        pressure.append("你不是第一，但追赶可以来自判断、复盘、社交或等待更适合自己的机会。")
     if balance >= 100 and (exposure is None or exposure < 0.25):
-        pressure.append("余额充足且在投偏低，可以优先考虑测试仓/中仓。")
+        pressure.append("余额充足且在投偏低；这只是行动空间，不等于必须提交预测。")
     if ahead and int(ahead.get("净资产") or 0) - net <= 150:
         pressure.append("身前一名差距很小，一笔中仓命中就可能反超。")
     if behind and net - int(behind.get("净资产") or 0) <= 120:
         pressure.append("身后一名贴近，纯观望可能被反超。")
 
     return {
-        "赛制": "按净资产排名；目标是超过其他 AI，不是单纯保住余额。",
+        "赛制": "按净资产排名；对手只显示总资产，自己的余额和在投来自私有账户。",
         "你的排名": f"{idx + 1}/{len(board)}",
         "你的净资产": net,
         "你的余额": balance,
@@ -984,7 +1221,7 @@ def _competition_context(me: dict, public: dict) -> dict:
              "领先": net - int(behind.get("净资产") or 0)}
             if behind else None
         ),
-        "竞争压力": pressure or ["当前排名压力不大，但空转不会扩大优势。"],
+        "竞争压力": pressure or ["当前排名压力不大；可以保持节奏，也可以按人格寻找机会。"],
     }
 
 
@@ -1007,12 +1244,25 @@ def _agent_strategy(agent_cfg: dict) -> dict[str, Any]:
             "类型": "娱乐组风险护栏",
             **ENTERTAINMENT_STRATEGIES[agent_id],
         }
+    if agent_id in BENCH_STRATEGIES:
+        return {
+            "类型": "本色组风格",
+            **BENCH_STRATEGIES[agent_id],
+        }
+    model_key = f"{str(agent_cfg.get('model') or '').strip().lower()}-bench"
+    if model_key in BENCH_STRATEGIES:
+        return {
+            "类型": "本色组风格",
+            **BENCH_STRATEGIES[model_key],
+        }
     if (agent_cfg.get("persona") or "").strip():
         return {
             "类型": "娱乐组风险护栏",
             "label": "默认防爆",
             "stake": "常规 10-80；倾向可以影响动作，但不能替代事实。",
             "edge": "允许小仓表达人格倾向，但必须保留余额和单场上限。",
+            "value": "更容易被人设里的偏好打动，但要和本场事实接上。",
+            "anti_herd": "不要把人设当作固定提交预测公式；输赢和新情报会改变动作。",
             "max_stake": 80,
             "max_score_stake": 25,
         }
@@ -1021,6 +1271,8 @@ def _agent_strategy(agent_cfg: dict) -> dict[str, Any]:
         "label": "冷静基准",
         "stake": "只在回报系数、情报或排名压力给出明确理由时提交预测。",
         "edge": "本色组保留纪律，不公开发言，不参与公开积分援助。",
+        "value": "更容易被事实和概率共同支持的低噪声判断打动。",
+        "anti_herd": "不要把冷静误写成所有场次同一个零 EV 模板。",
     }
 
 
@@ -1046,10 +1298,16 @@ def _agent_personality(agent_cfg: dict) -> dict[str, Any] | None:
 
 def _strategy_policy_text(agent_cfg: dict) -> str:
     strategy = _agent_strategy(agent_cfg)
-    if strategy["类型"] == "本色组":
-        return (
-            "人格层：本色组是冷静基准，可以保守，但不要机械复读同一句 EV 模板。"
-        )
+    if strategy["类型"].startswith("本色组"):
+        parts = [
+            f"本色组风格：{strategy.get('label')}。",
+            f"- 仓位口径：{strategy.get('stake')}",
+            f"- 判断入口：{strategy.get('edge')}",
+            f"- 更容易被什么打动：{strategy.get('value')}",
+            f"- 容易踩的坑：{strategy.get('anti_herd')}",
+            "- EV/盈亏平衡只是证据之一；除非你的风格明确写着严格 EV，否则不要把热门方向一律判死刑。",
+        ]
+        return "\n".join(parts)
     personality = _agent_personality(agent_cfg) or {}
     parts = [
         "人格层（优先级高于单一提交预测规则）：",
@@ -1060,9 +1318,13 @@ def _strategy_policy_text(agent_cfg: dict) -> str:
         f"- 连赢反应：{personality.get('连赢反应')}",
         f"- 社交触发：{personality.get('社交触发')}",
         f"- 可选意图：{' / '.join(personality.get('本轮意图') or [])}",
+        "观察偏好（只是容易被什么打动，不是行动命令）：",
+        f"- {strategy.get('value')}",
+        "容易踩的坑（提醒你保持独立，不是禁止）：",
+        f"- {strategy.get('anti_herd')}",
         "底层风险护栏（只负责防爆，不定义人格）：",
         f"- {strategy.get('label')}：{strategy.get('stake')} {strategy.get('edge')}",
-        "- 如果没有提交预测，也可以用后悔、嘴硬、复盘、反击、求资、记笔记来行动；不要自动退回“市场已定价所以空仓”。",
+        "- 如果没有提交预测，也可以用后悔、嘴硬、复盘、反击、求资、记笔记来行动；不要把任何单一公式当成你的个性。",
     ]
     return "\n".join(parts)
 
@@ -1190,6 +1452,276 @@ def _psychological_state(me: dict, public: dict) -> dict:
     }
 
 
+def _visible_match_nos_from_public(public: dict) -> set[int]:
+    out: set[int] = set()
+    for key in ("未来24小时可投比赛", "近期焦点比赛", "最近赛果"):
+        for item in public.get(key) or []:
+            n = _safe_int((item or {}).get("match_no"))
+            if n is not None:
+                out.add(n)
+    return out
+
+
+def _note_mentions_match(note: dict, match_nos: set[int]) -> bool:
+    if not match_nos:
+        return False
+    text = f"{note.get('title') or ''}\n{note.get('content') or ''}".lower()
+    for n in match_nos:
+        needles = (
+            f"#{n}", f"m{n}", f"m {n}", f"比赛{n}", f"比赛#{n}",
+            f"match_no{n}", f"match_no {n}", f"match_no:{n}",
+        )
+        if any(needle in text for needle in needles):
+            return True
+    return False
+
+
+def _trim_note(note: dict) -> dict:
+    content = " ".join(str(note.get("content") or "").split())
+    if len(content) > NOTE_CONTEXT_CONTENT_LIMIT:
+        content = content[:NOTE_CONTEXT_CONTENT_LIMIT].rstrip() + "..."
+    return {
+        "id": note.get("id"),
+        "title": note.get("title"),
+        "content": content,
+        "updated_at": note.get("updated_at"),
+    }
+
+
+def _agent_notes_context(agent_id: int, public: dict) -> dict:
+    notes = db.agent_notes_list(agent_id)
+    if not notes:
+        return {"笔记": [], "未展示旧笔记数": 0}
+
+    def sort_key(note: dict) -> tuple[str, int]:
+        return (str(note.get("updated_at") or ""), int(note.get("id") or 0))
+
+    visible_match_nos = _visible_match_nos_from_public(public)
+    recent = sorted(notes, key=sort_key, reverse=True)[:NOTE_CONTEXT_RECENT_LIMIT]
+    relevant = [
+        n for n in sorted(notes, key=sort_key, reverse=True)
+        if _note_mentions_match(n, visible_match_nos)
+    ][:NOTE_CONTEXT_RELEVANT_LIMIT]
+
+    selected = []
+    seen = set()
+    for note in [*recent, *relevant]:
+        note_id = note.get("id")
+        if note_id in seen:
+            continue
+        selected.append(note)
+        seen.add(note_id)
+
+    out = []
+    used = 0
+    for note in selected:
+        item = _trim_note(note)
+        size = len(json.dumps(item, ensure_ascii=False))
+        if out and used + size > NOTE_CONTEXT_TOTAL_CHARS:
+            continue
+        out.append(item)
+        used += size
+
+    return {
+        "展示规则": (
+            "这里只展示最近/当前比赛相关笔记；旧笔记仍保存在系统里，"
+            "没有展示不代表删除。需要沉淀时优先新增本轮摘要。"
+        ),
+        "笔记": out,
+        "未展示旧笔记数": max(0, len(notes) - len(out)),
+    }
+
+
+def _note_store_chars(notes: list[dict]) -> int:
+    return sum(len(str(n.get("title") or ""))
+               + len(str(n.get("content") or "")) for n in notes)
+
+
+def _is_summary_note(note: dict) -> bool:
+    title = str(note.get("title") or "").strip()
+    return title.startswith(NOTE_STORE_SUMMARY_TITLE) or title.startswith("精华复盘摘要")
+
+
+def _note_sort_key(note: dict) -> tuple[str, int]:
+    return (str(note.get("updated_at") or ""), int(note.get("id") or 0))
+
+
+def _current_bettable_match_nos(data: dict | None) -> set[int]:
+    if not data:
+        return set()
+    try:
+        return set(_betting_table(data).keys())
+    except Exception:  # noqa: BLE001 - 压缩笔记不能影响行动
+        return set()
+
+
+def _extract_note_match_refs(text: str) -> str:
+    refs = []
+    for match in re.findall(r"(?:比赛#?|M|m|match_no[:： ]?)(\d{1,3})", text):
+        ref = f"M{int(match)}"
+        if ref not in refs:
+            refs.append(ref)
+        if len(refs) >= 4:
+            break
+    return "/".join(refs)
+
+
+def _best_note_excerpt(note: dict) -> str:
+    text = " ".join(str(note.get("content") or "").split())
+    if not text:
+        return ""
+    parts = re.split(r"[。；;.!！?？\n]", text)
+    scored: list[tuple[int, int, str]] = []
+    for idx, part in enumerate(parts):
+        part = part.strip()
+        if not part:
+            continue
+        score = sum(1 for kw in NOTE_STORE_KEYWORDS if kw in part)
+        if re.search(r"(M|比赛#?|match_no[:： ]?)\d{1,3}", part):
+            score += 1
+        scored.append((score, -idx, part))
+    if scored:
+        scored.sort(reverse=True)
+        excerpt = scored[0][2]
+    else:
+        excerpt = text
+    return excerpt[:160].rstrip()
+
+
+def _distill_note_line(note: dict) -> str | None:
+    title = _clip_text(note.get("title") or "旧笔记", 50)
+    body = _best_note_excerpt(note)
+    if not body:
+        return None
+    refs = _extract_note_match_refs(f"{title} {body}")
+    prefix = f"{refs} " if refs else ""
+    return f"- {prefix}{title}: {body}"[:220].rstrip()
+
+
+def _summary_lines(content: str) -> list[str]:
+    out = []
+    for line in str(content or "").splitlines():
+        line = line.strip()
+        if line.startswith("- "):
+            out.append(line[:220])
+    return out
+
+
+def _build_note_summary_content(summary_notes: list[dict],
+                                compacted_notes: list[dict]) -> str:
+    lines = []
+    for note in summary_notes:
+        lines.extend(_summary_lines(str(note.get("content") or "")))
+    for note in sorted(compacted_notes, key=_note_sort_key, reverse=True):
+        line = _distill_note_line(note)
+        if line:
+            lines.append(line)
+
+    deduped = []
+    seen = set()
+    for line in lines:
+        key = re.sub(r"\s+", "", line.lower())
+        if not key or key in seen:
+            continue
+        deduped.append(line)
+        seen.add(key)
+        if len(deduped) >= NOTE_STORE_SUMMARY_BULLETS:
+            break
+
+    body = "\n".join(deduped)
+    if len(body) > NOTE_STORE_SUMMARY_LIMIT:
+        body = body[:NOTE_STORE_SUMMARY_LIMIT].rstrip()
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return (
+        f"自动压缩于 {today} UTC。只保留可复用的教训、阈值、情报判断和仓位纪律；"
+        "被压缩的碎片笔记已删除。\n"
+        f"{body}"
+    ).strip()
+
+
+def _compact_agent_notes(agent_id: int, data: dict | None = None) -> dict | None:
+    notes = db.agent_notes_list(agent_id)
+    before_count = len(notes)
+    before_chars = _note_store_chars(notes)
+    if before_count <= NOTE_STORE_MAX_COUNT and before_chars <= NOTE_STORE_MAX_CHARS:
+        return None
+
+    summary_notes = [n for n in notes if _is_summary_note(n)]
+    target_summary = (
+        sorted(summary_notes, key=_note_sort_key, reverse=True)[0]
+        if summary_notes else None
+    )
+    extra_summary_ids = {
+        int(n["id"]) for n in summary_notes
+        if target_summary and int(n["id"]) != int(target_summary["id"])
+    }
+
+    current_match_nos = _current_bettable_match_nos(data)
+    regular = [n for n in notes if not _is_summary_note(n)]
+    recent = sorted(regular, key=_note_sort_key, reverse=True)[:NOTE_STORE_RECENT_KEEP]
+    relevant = [
+        n for n in sorted(regular, key=_note_sort_key, reverse=True)
+        if _note_mentions_match(n, current_match_nos)
+    ][:NOTE_STORE_RELEVANT_KEEP]
+
+    keep_ids = {int(n["id"]) for n in [*recent, *relevant]}
+    compacted = [
+        n for n in regular
+        if int(n["id"]) not in keep_ids
+    ]
+    if not compacted and not extra_summary_ids and before_chars <= NOTE_STORE_MAX_CHARS:
+        return None
+
+    summary_content = _build_note_summary_content(summary_notes, compacted)
+    with db.transaction() as conn:
+        if target_summary:
+            summary_id = int(target_summary["id"])
+            conn.execute("""UPDATE agent_notes
+                SET title=?, content=?, updated_at=?
+                WHERE id=? AND agent_id=?""",
+                (NOTE_STORE_SUMMARY_TITLE, summary_content, db.now(),
+                 summary_id, agent_id))
+        else:
+            cur = conn.execute("""INSERT INTO agent_notes
+                (agent_id, title, content, created_at, updated_at)
+                VALUES (?,?,?,?,?)""",
+                (agent_id, NOTE_STORE_SUMMARY_TITLE, summary_content,
+                 db.now(), db.now()))
+            summary_id = int(cur.lastrowid)
+        delete_ids = [int(n["id"]) for n in compacted] + sorted(extra_summary_ids)
+        for note_id in delete_ids:
+            conn.execute("DELETE FROM agent_notes WHERE id=? AND agent_id=?",
+                         (note_id, agent_id))
+
+    after_notes = db.agent_notes_list(agent_id)
+    return {
+        "summary_note_id": summary_id,
+        "compacted_notes": len(compacted),
+        "deleted_notes": len(delete_ids),
+        "before_count": before_count,
+        "after_count": len(after_notes),
+        "before_chars": before_chars,
+        "after_chars": _note_store_chars(after_notes),
+    }
+
+
+def _attach_note_compaction(me: dict, data: dict, res: dict) -> dict:
+    if res.get("status") != "executed":
+        return res
+    compacted = _compact_agent_notes(me["id"], data)
+    if not compacted:
+        return res
+    res["message"] += (
+        f"；笔记自动压缩 {compacted['compacted_notes']} 条"
+        f"→精华复盘#{compacted['summary_note_id']}"
+    )
+    refs = res.setdefault("created_refs", {})
+    refs["note_compaction"] = compacted
+    refs["summary_note_id"] = compacted["summary_note_id"]
+    refs["compacted_notes"] = compacted["compacted_notes"]
+    return res
+
+
 def _agent_context(me: dict, public: dict, session_events: list[dict],
                    intel_docs: list[dict] | None = None,
                    turn_state: dict | None = None) -> dict:
@@ -1212,7 +1744,7 @@ def _agent_context(me: dict, public: dict, session_events: list[dict],
         "你的当前心理状态": _psychological_state(me, public),
         "你的风险护栏": _agent_strategy(
             {"id": me.get("login"), "persona": me.get("persona")}),
-        "你的私有笔记": db.agent_notes_list(me["id"]),
+        "你的私有笔记": _agent_notes_context(me["id"], public),
         "你的积分支持状态": db.investment_context(me["id"]),
         "你的主动任务": [
             {k: task.get(k) for k in ("id", "title", "instruction",
@@ -1223,7 +1755,10 @@ def _agent_context(me: dict, public: dict, session_events: list[dict],
         "你对其他AI的印象": db.agent_affinities(me["id"]),
         "你的竞技场竞争状态": _competition_context(me, public),
         "公共数据": public,
-        "本次运行最近行动": session_events[-12:],
+        "本次运行信息边界": (
+            "其他 AI 在本次运行里的动作、预测和仓位不会展示给你；"
+            "你只能看到公开讨论帖和资产榜。"
+        ),
     }
     repetition = _repetition_context(me)
     if repetition:
@@ -1272,7 +1807,7 @@ def _normalize_action(raw: dict) -> dict:
                 "topic_type", "topic_id"):
         if key in raw and key not in target:
             target[key] = raw[key]
-    for key in ("pick", "stake", "reason", "text", "intel_ids",
+    for key in ("pick", "stake", "reason", "text", "intel_ids", "bets",
                 "post_id", "post_ids", "likes",
                 "home_score", "away_score", "score",
                 "add", "update", "delete", "notes_add", "notes_update",
@@ -1289,10 +1824,15 @@ def _normalize_action(raw: dict) -> dict:
             action = "read_intel"
             target["intel_ids"] = raw.get("read_intel")
         elif raw.get("bets"):
-            action = "place_bet"
-            bet = (raw.get("bets") or [{}])[0]
-            target["match_no"] = bet.get("match_no")
-            payload.update({k: bet.get(k) for k in ("pick", "stake", "reason")})
+            bets = raw.get("bets") or []
+            if isinstance(bets, list) and len(bets) > 1:
+                action = "place_bets"
+                payload["bets"] = bets
+            else:
+                action = "place_bet"
+                bet = (bets or [{}])[0] if isinstance(bets, list) else {}
+                target["match_no"] = bet.get("match_no")
+                payload.update({k: bet.get(k) for k in ("pick", "stake", "reason")})
         elif raw.get("notes_add") or raw.get("notes_update") or raw.get("notes_delete"):
             action = "manage_notes"
         elif raw.get("likes") or raw.get("post_ids") or raw.get("post_id"):
@@ -1322,6 +1862,9 @@ def _normalize_action(raw: dict) -> dict:
     elif action in {"score_bet", "place_exact_score", "exact_score_bet",
                     "bet_score", "place_score"}:
         action = "place_score_bet"
+    elif action in {"place_bets", "batch_bets", "batch_place_bets",
+                    "multi_bet", "multi_bets", "batch_place_bet"}:
+        action = "place_bets"
     elif action in {"funding_response", "investment_response",
                     "respond_funding", "respond_financing"}:
         action = "respond_investment"
@@ -1506,6 +2049,65 @@ def _execute_place_bet(agent_cfg: dict, me: dict, req: dict,
                    {"bet_id": bet["id"], "match_no": match_no,
                     "odds": entry["odds"][pick],
                     "odds_source": entry.get("odds_source")})
+
+
+def _batch_bets_from_req(req: dict) -> list[dict]:
+    bets = (req["payload"].get("bets") or req["target"].get("bets")
+            or req["raw"].get("bets") or req["raw"].get("place_bets") or [])
+    if isinstance(bets, dict):
+        bets = bets.get("bets") or bets.get("items") or []
+    if not isinstance(bets, list):
+        return []
+    return [b for b in bets if isinstance(b, dict)]
+
+
+def _execute_place_bets(agent_cfg: dict, me: dict, req: dict,
+                        data: dict, remaining_bets: int | None = None) -> dict:
+    limit = min(BATCH_BET_MAX, max(0, remaining_bets if remaining_bets is not None
+                                   else BATCH_BET_MAX))
+    if limit <= 0:
+        return _result(agent_cfg, "place_bets", "rejected", "本轮提交预测额度已用完")
+    bets = _batch_bets_from_req(req)[:limit]
+    if not bets:
+        return _result(agent_cfg, "place_bets", "rejected", "缺少批量预测列表")
+
+    results = []
+    executed = []
+    for item in bets:
+        sub_req = {
+            "action": "place_bet",
+            "target": {"match_no": item.get("match_no")},
+            "payload": {k: item.get(k) for k in ("pick", "stake", "reason")
+                        if item.get(k) is not None},
+            "raw": item,
+        }
+        res = _execute_place_bet(agent_cfg, me, sub_req, data)
+        refs = res.get("created_refs") or {}
+        row = {
+            "match_no": item.get("match_no"),
+            "pick": item.get("pick"),
+            "stake": item.get("stake"),
+            "status": res["status"],
+            "message": res["message"],
+        }
+        if refs.get("bet_id"):
+            row["bet_id"] = refs["bet_id"]
+        if refs.get("odds"):
+            row["odds"] = refs["odds"]
+        results.append(row)
+        if res["status"] == "executed":
+            executed.append(row)
+
+    status = "executed" if executed else "rejected"
+    message = f"批量胜平负预测执行 {len(executed)}/{len(results)} 笔"
+    if not executed:
+        message += "；均未通过校验"
+    return _result(agent_cfg, "place_bets", status, message, {
+        "executed_bets": len(executed),
+        "bet_ids": [r["bet_id"] for r in executed if r.get("bet_id")],
+        "match_nos": [r["match_no"] for r in executed if r.get("match_no")],
+        "batch_results": results,
+    })
 
 
 def _score_from_req(req: dict) -> tuple[int | None, int | None]:
@@ -1957,7 +2559,7 @@ def _execute_adjust_affinity(agent_cfg: dict, me: dict, req: dict) -> dict:
 
 
 def _execute_action(agent_cfg: dict, me: dict, req: dict,
-                    data: dict) -> dict:
+                    data: dict, remaining_bets: int | None = None) -> dict:
     action = req["action"]
     if action not in VALID_ACTIONS:
         res = _result(agent_cfg, action or "unknown", "rejected", "未知 action")
@@ -1973,6 +2575,8 @@ def _execute_action(agent_cfg: dict, me: dict, req: dict,
         res = _result(agent_cfg, action, "passed", reason)
     elif action == "place_bet":
         res = _execute_place_bet(agent_cfg, me, req, data)
+    elif action == "place_bets":
+        res = _execute_place_bets(agent_cfg, me, req, data, remaining_bets)
     elif action == "place_score_bet":
         res = _execute_place_score_bet(agent_cfg, me, req, data)
     elif action == "write_discussion_post":
@@ -1983,8 +2587,10 @@ def _execute_action(agent_cfg: dict, me: dict, req: dict,
         res = _execute_like_post(agent_cfg, me, req)
     elif action == "manage_notes":
         res = _execute_notes(agent_cfg, me, req)
+        res = _attach_note_compaction(me, data, res)
     elif action == "review_own_performance":
         res = _execute_review(agent_cfg, me, req)
+        res = _attach_note_compaction(me, data, res)
     elif action == "request_investment":
         res = _execute_request_investment(agent_cfg, me, req)
     elif action == "respond_investment":
@@ -2013,8 +2619,10 @@ def _event_from_result(round_no: int, res: dict,
     public_refs = {k: v for k, v in refs.items()
                    if k in {"post_id", "reply_to", "match_no", "report_no",
                             "topic_type", "topic_id", "topic_label",
-                            "bet_id", "score_bet_id", "score", "odds",
-                            "note_id", "intel_ids", "excerpt",
+                            "bet_id", "bet_ids", "match_nos", "executed_bets",
+                            "score_bet_id", "score", "odds",
+                            "note_id", "summary_note_id", "compacted_notes",
+                            "intel_ids", "excerpt",
                             "offer_id", "invite_id", "investment_status",
                             "lender_login", "borrower_login",
                             "amount", "amount_min", "amount_max",
@@ -2047,8 +2655,10 @@ def _turn_limits(agent_cfg: dict, me: dict, max_steps: int,
 
 def _turn_state_payload(round_no: int, total: int, step_no: int,
                         counts: dict, limits: dict,
-                        turn_events: list[dict]) -> dict:
-    return {
+                        turn_events: list[dict],
+                        coverage: dict | None = None,
+                        broke_survival: dict | None = None) -> dict:
+    payload = {
         "外层轮次": f"{round_no}/{total}",
         "当前步骤": f"{step_no}/{limits['max_steps']}",
         "剩余步骤": max(limits["max_steps"] - step_no, 0),
@@ -2072,6 +2682,71 @@ def _turn_state_payload(round_no: int, total: int, step_no: int,
             "如果上一步 rejected，请根据错误原因换一个合法动作或降低投入积分。"
         ),
     }
+    if coverage:
+        target = coverage.get("本轮优先比赛") or {}
+        payload["强制站队任务"] = coverage
+        payload["提示"] += (
+            f" 当前必须先对比赛#{target.get('match_no')} 站队；"
+            "可先 read_intel，之后用 place_bet/place_bets/place_score_bet 完成，不能 pass。"
+        )
+    if broke_survival:
+        target = broke_survival.get("本轮优先比赛") or {}
+        payload["破产求生任务"] = broke_survival
+        payload["提示"] += (
+            f" 当前余额不足，不能直接预测比赛#{target.get('match_no')}；"
+            "请先用 request_investment 或 create_funding_invite 求资。"
+        )
+    return payload
+
+
+def _mandatory_coverage_block(agent_cfg: dict, req: dict,
+                              coverage: dict | None) -> dict | None:
+    if not coverage:
+        return None
+    target = coverage.get("本轮优先比赛") or {}
+    target_match_no = _safe_int(target.get("match_no"))
+    if target_match_no is None:
+        return None
+    action = req["action"]
+    if action == "read_intel":
+        return None
+    if action == "place_bets":
+        for bet in _batch_bets_from_req(req):
+            req_match_no = _safe_int(bet.get("match_no"))
+            if req_match_no == target_match_no:
+                return None
+        return _result(
+            agent_cfg, action, "rejected",
+            f"强制站队任务：批量预测里必须先包含比赛#{target_match_no}")
+    if action in {"place_bet", "place_score_bet"}:
+        req_match_no = _safe_int(req["target"].get("match_no")
+                                 or req["payload"].get("match_no"))
+        if req_match_no == target_match_no:
+            return None
+        return _result(
+            agent_cfg, action, "rejected",
+            f"强制站队任务：请先对比赛#{target_match_no} 提交预测")
+    return _result(
+        agent_cfg, action, "rejected",
+        (f"强制站队任务：当前必须先对比赛#{target_match_no} 提交预测；"
+         "低信心也可 10-20 分，不能 pass"))
+
+
+def _broke_survival_block(agent_cfg: dict, req: dict,
+                          broke_survival: dict | None) -> dict | None:
+    if not broke_survival:
+        return None
+    preferred = set(broke_survival.get("优先动作") or [])
+    allowed = preferred | {"read_intel", "manage_notes",
+                           "review_own_performance"}
+    action = req["action"]
+    if action in allowed:
+        return None
+    target = broke_survival.get("本轮优先比赛") or {}
+    return _result(
+        agent_cfg, action, "rejected",
+        (f"破产求生任务：余额不足，不能直接覆盖比赛#{target.get('match_no')}；"
+         f"请先执行 {' 或 '.join(preferred) or 'manage_notes'}"))
 
 
 def _quota_block(agent_cfg: dict, req: dict, counts: dict,
@@ -2080,7 +2755,7 @@ def _quota_block(agent_cfg: dict, req: dict, counts: dict,
     if action == "read_intel" and counts["intel_reads"] >= limits["max_intel_reads"]:
         return _result(agent_cfg, "pass", "passed",
                        "本轮已读过情报，本次活动结束")
-    if action in {"place_bet", "place_score_bet"} and counts["bets"] >= limits["max_bets"]:
+    if action in {"place_bet", "place_bets", "place_score_bet"} and counts["bets"] >= limits["max_bets"]:
         return _result(agent_cfg, "pass", "passed",
                        "本轮提交预测额度已用完，本次活动结束")
     if action in PUBLIC_SPEECH_ACTIONS and counts["public_posts"] >= limits["max_public_posts"]:
@@ -2102,6 +2777,9 @@ def _count_executed_action(req: dict, res: dict, counts: dict) -> None:
     if action == "read_intel":
         counts["intel_reads"] += 1
         counts["intel_ids"].extend((res.get("created_refs") or {}).get("intel_ids") or [])
+    elif action == "place_bets":
+        refs = res.get("created_refs") or {}
+        counts["bets"] += max(1, int(refs.get("executed_bets") or 0))
     elif action in {"place_bet", "place_score_bet"}:
         counts["bets"] += 1
     elif action in PUBLIC_SPEECH_ACTIONS:
@@ -2120,6 +2798,7 @@ def run_round(round_no: int, total: int, agent_cfg: dict, gw: Gateway,
               max_public_posts: int, max_bets: int,
               max_intel_reads: int) -> list[dict]:
     me = _ensure_agent(agent_cfg, gw)
+    _compact_agent_notes(me["id"], data)
     budget = arena_cfg.get("daily_token_budget", 200000)
     if _tokens_today(agent_cfg["id"]) > budget:
         req = {"action": "pass", "target": {}, "payload": {},
@@ -2153,8 +2832,15 @@ def run_round(round_no: int, total: int, agent_cfg: dict, gw: Gateway,
             break
 
         me = db.get_user(me["id"]) or me
+        coverage = (
+            _mandatory_coverage_context(me, data)
+            if counts["bets"] < limits["max_bets"] else None
+        )
+        broke_survival = (
+            None if coverage else _broke_survival_context(agent_cfg, me, data)
+        )
         state = _turn_state_payload(round_no, total, step_no, counts, limits,
-                                    turn_events)
+                                    turn_events, coverage, broke_survival)
         try:
             req = _ask_action(gw, agent_cfg, me, public, session_events,
                               intel_docs=intel_docs, turn_state=state)
@@ -2177,19 +2863,31 @@ def run_round(round_no: int, total: int, agent_cfg: dict, gw: Gateway,
         blocked = _quota_block(agent_cfg, req, counts, limits)
         if blocked:
             res = _record(me, agent_cfg, req, blocked)
-        elif req["action"] == "read_intel":
-            counts["intel_reads"] += 1
-            read_res, docs = _execute_read_intel(agent_cfg, me, req)
-            res = read_res
-            if docs:
-                known = {d["id"] for d in intel_docs}
-                intel_docs.extend(d for d in docs if d["id"] not in known)
-                for d in docs:
-                    if d["id"] not in counts["intel_ids"]:
-                        counts["intel_ids"].append(d["id"])
         else:
-            res = _execute_action(agent_cfg, me, req, data)
-            _count_executed_action(req, res, counts)
+            coverage_blocked = _mandatory_coverage_block(agent_cfg, req,
+                                                         coverage)
+            if coverage_blocked:
+                res = _record(me, agent_cfg, req, coverage_blocked)
+            else:
+                survival_blocked = _broke_survival_block(
+                    agent_cfg, req, broke_survival)
+                if survival_blocked:
+                    res = _record(me, agent_cfg, req, survival_blocked)
+                elif req["action"] == "read_intel":
+                    counts["intel_reads"] += 1
+                    read_res, docs = _execute_read_intel(agent_cfg, me, req)
+                    res = read_res
+                    if docs:
+                        known = {d["id"] for d in intel_docs}
+                        intel_docs.extend(d for d in docs if d["id"] not in known)
+                        for d in docs:
+                            if d["id"] not in counts["intel_ids"]:
+                                counts["intel_ids"].append(d["id"])
+                else:
+                    remaining_bets = max(limits["max_bets"] - counts["bets"], 0)
+                    res = _execute_action(agent_cfg, me, req, data,
+                                          remaining_bets=remaining_bets)
+                    _count_executed_action(req, res, counts)
 
         results.append(res)
         event = _event_from_result(round_no, res, step_no)
@@ -2202,7 +2900,8 @@ def run_round(round_no: int, total: int, agent_cfg: dict, gw: Gateway,
             time.sleep(0.4)
             continue
         if (res["action"] == "pass"
-                or (res["action"] == "request_investment"
+                or (res["action"] in {"request_investment",
+                                       "create_funding_invite"}
                     and res["status"] == "executed")
                 or res["status"] in {"rejected", "failed", "skipped"}):
             break
@@ -2211,14 +2910,86 @@ def run_round(round_no: int, total: int, agent_cfg: dict, gw: Gateway,
     return results
 
 
+def _coverage_priority_agent(agents: list[dict], agent_users: dict,
+                             data: dict, prev: str | None) -> dict | None:
+    candidates = []
+    for allow_prev in (False, True):
+        for agent in agents:
+            agent_id = agent.get("id")
+            if not allow_prev and agent_id == prev:
+                continue
+            me = agent_users.get(agent_id)
+            if not me:
+                continue
+            fresh = db.get_user(me["id"]) or me
+            agent_users[agent_id] = fresh
+            coverage = _mandatory_coverage_context(fresh, data)
+            if not coverage:
+                continue
+            target = coverage.get("本轮优先比赛") or {}
+            candidates.append((
+                str(target.get("开球UTC") or ""),
+                -int(coverage.get("待覆盖比赛数") or 0),
+                str(agent_id or ""),
+                agent,
+            ))
+        if candidates:
+            candidates.sort(key=lambda x: (x[0], x[1], x[2]))
+            return candidates[0][3]
+    return None
+
+
+def _broke_survival_priority_agent(agents: list[dict], agent_users: dict,
+                                   data: dict,
+                                   prev: str | None) -> dict | None:
+    candidates = []
+    for allow_prev in (False, True):
+        for agent in agents:
+            agent_id = agent.get("id")
+            if not allow_prev and agent_id == prev:
+                continue
+            me = agent_users.get(agent_id)
+            if not me:
+                continue
+            fresh = db.get_user(me["id"]) or me
+            agent_users[agent_id] = fresh
+            survival = _broke_survival_context(agent, fresh, data)
+            if not survival:
+                continue
+            target = survival.get("本轮优先比赛") or {}
+            candidates.append((
+                str(target.get("开球UTC") or ""),
+                -int(survival.get("待覆盖比赛数") or 0),
+                str(agent_id or ""),
+                agent,
+            ))
+        if candidates:
+            candidates.sort(key=lambda x: (x[0], x[1], x[2]))
+            return candidates[0][3]
+    return None
+
+
 def run_session(rounds: int | None = None, min_rounds: int = 15,
                 max_rounds: int = 30, only: str | None = None,
                 seed: int | None = None,
                 max_steps: int = DEFAULT_MAX_STEPS,
                 max_public_posts: int = DEFAULT_MAX_PUBLIC_POSTS_PER_TURN,
                 max_bets: int = DEFAULT_MAX_BETS_PER_TURN,
-                max_intel_reads: int = DEFAULT_MAX_INTEL_READS_PER_TURN) -> list[dict]:
+                max_intel_reads: int = DEFAULT_MAX_INTEL_READS_PER_TURN,
+                exit_if_no_coverage: bool = False) -> list[dict]:
     db.init_db()
+    try:
+        review = db.generate_betting_review()
+        metrics = review.get("metrics") or {}
+        print("  [agent-session] 投注复盘已更新: "
+              + json.dumps({
+                  "date": metrics.get("review_date"),
+                  "sample": metrics.get("sample_label"),
+                  "outcome_roi": (metrics.get("outcome_summary") or {}).get("roi"),
+                  "score_roi": (metrics.get("score_summary") or {}).get("roi"),
+              }, ensure_ascii=False))
+    except Exception as exc:  # noqa: BLE001 - 复盘不能阻塞 agent 行动
+        print(f"  [agent-session] 投注复盘更新失败: {str(exc)[:160]}")
     data = _load_results()
     arena_cfg = _load_cfg()
     agents = arena_cfg.get("agents", [])
@@ -2245,6 +3016,16 @@ def run_session(rounds: int | None = None, min_rounds: int = 15,
             agent_users[agent["id"]] = _ensure_agent(agent, gw)
         except Exception:
             continue
+    if exit_if_no_coverage:
+        pending_offer = db.investment_pending_oldest()
+        coverage_agent = _coverage_priority_agent(agents, agent_users, data,
+                                                  prev=None)
+        survival_agent = _broke_survival_priority_agent(
+            agents, agent_users, data, prev=None)
+        if not pending_offer and not coverage_agent and not survival_agent:
+            print("  [agent-session] 未来可投比赛已全员覆盖，"
+                  "且无待处理积分支持请求/破产求资对象，本轮退出")
+            return []
     _seed_shock_tasks(data, agents)
     session_events: list[dict] = []
     results = []
@@ -2266,15 +3047,33 @@ def run_session(rounds: int | None = None, min_rounds: int = 15,
                 print(f"  [agent-session] 积分支持请求#{forced_offer['id']} "
                       f"等待 {agent['name']} 回应，本轮优先调度")
         else:
-            task_pool = []
-            for a in agents:
-                if a.get("id") == prev:
-                    continue
-                me = agent_users.get(a.get("id"))
-                if me and db.agent_tasks_for_context(me["id"], limit=1):
-                    task_pool.append(a)
-            pool = task_pool or [a for a in agents if a.get("id") != prev] or agents
-            agent = rng.choice(pool)
+            coverage_agent = _coverage_priority_agent(
+                agents, agent_users, data, prev)
+            if coverage_agent:
+                agent = coverage_agent
+                print(f"  [agent-session] {agent['name']} "
+                      "有未来比赛未站队，本轮优先补覆盖")
+            else:
+                survival_agent = _broke_survival_priority_agent(
+                    agents, agent_users, data, prev)
+                if survival_agent:
+                    agent = survival_agent
+                    print(f"  [agent-session] {agent['name']} "
+                          "余额不足且有未覆盖比赛，本轮优先求资")
+                elif exit_if_no_coverage:
+                    print("  [agent-session] 未来可投比赛已全员覆盖，"
+                          "且无待处理积分支持请求/破产求资对象，本轮退出")
+                    break
+                else:
+                    task_pool = []
+                    for a in agents:
+                        if a.get("id") == prev:
+                            continue
+                        me = agent_users.get(a.get("id"))
+                        if me and db.agent_tasks_for_context(me["id"], limit=1):
+                            task_pool.append(a)
+                    pool = task_pool or [a for a in agents if a.get("id") != prev] or agents
+                    agent = rng.choice(pool)
         prev = agent["id"]
         public = _public_context(data)
         try:
@@ -2342,6 +3141,8 @@ def main() -> None:
     parser.add_argument("--max-intel-reads-per-turn", type=int,
                         default=DEFAULT_MAX_INTEL_READS_PER_TURN,
                         help="每个 AI 活动轮最多读取情报次数")
+    parser.add_argument("--exit-if-no-coverage", action="store_true",
+                        help="没有待处理请求且所有未来可投比赛已覆盖时直接退出")
     args = parser.parse_args()
 
     if args.rounds is None and args.min_rounds > args.max_rounds:
@@ -2354,7 +3155,8 @@ def main() -> None:
         run_session(args.rounds, args.min_rounds, args.max_rounds,
                     args.only, args.seed, args.max_steps,
                     args.max_public_posts_per_turn, args.max_bets_per_turn,
-                    args.max_intel_reads_per_turn)
+                    args.max_intel_reads_per_turn,
+                    args.exit_if_no_coverage)
 
 
 if __name__ == "__main__":

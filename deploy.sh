@@ -15,11 +15,15 @@ fi
 
 EXCLUDES=(--exclude '__pycache__' --exclude '.DS_Store' --exclude 'out/'
           --exclude 'share/' --exclude '.claude/' --exclude '.git/'
-          --exclude '.deploy.env' --exclude '.venv/' --exclude 'data/worldcup.db*' --exclude 'backups/')
+          --exclude '.deploy.env' --exclude '.env' --exclude '.env.*'
+          --exclude '.venv/' --exclude 'NOTES.md' --exclude 'data/config.json'
+          --exclude 'data/worldcup.db*' --exclude 'backups/')
 if [[ "$1" != "--init" ]]; then
   EXCLUDES+=(--exclude 'web/data.js' --exclude 'data/history.json'
              --exclude 'data/matches.json' --exclude 'data/manual_results.json'
-             --exclude 'data/odds.json' --exclude 'data/locked_preds.json')
+             --exclude 'data/odds.json' --exclude 'data/locked_preds.json'
+             --exclude 'data/intl_results.csv' --exclude 'web/reports.js'
+             --exclude 'web/blurbs.js' --exclude 'web/intel.js')
 fi
 
 rsync -avz --delete "${EXCLUDES[@]}" ./ "$SERVER:$DEST/"

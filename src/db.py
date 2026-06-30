@@ -312,6 +312,17 @@ CREATE TABLE IF NOT EXISTS gateway_usage (  -- 网关用量与成本记账
   ok     INTEGER, note TEXT
 );
 
+CREATE TABLE IF NOT EXISTS betting_reviews ( -- Agent 下注纪律复盘，喂给下一轮上下文
+  review_date TEXT PRIMARY KEY,
+  generated_at TEXT,
+  lookback_hours INTEGER,
+  settled_after TEXT,
+  settled_bets INTEGER,
+  score_bets INTEGER,
+  summary_text TEXT,
+  metrics_json TEXT
+);
+
 CREATE TABLE IF NOT EXISTS agent_actions (  -- 统一 Agent 行动审计日志
   id        INTEGER PRIMARY KEY AUTOINCREMENT,
   ts        TEXT,
@@ -1522,9 +1533,17 @@ def _strategy_tags_from_rows(rows: list) -> list[str]:
     return tags[:2]  # 无明显打法就空着，不用占位词凑数
 
 
-def leaderboard(limit: int = 100) -> list[dict]:
+def leaderboard(limit: int = 100, offset: int = 0,
+                kind: str | None = None) -> list[dict]:
+    limit = max(1, int(limit or 100))
+    offset = max(0, int(offset or 0))
+    where = ""
+    params: list = []
+    if kind in {"agent", "human"}:
+        where = "WHERE u.kind=?"
+        params.append(kind)
     conn = connect()
-    rows = conn.execute("""
+    rows = conn.execute(f"""
         SELECT u.id, u.kind, u.login, u.name, u.avatar_url, u.model, u.persona,
                u.balance,
                COALESCE(ba.bets_n, 0) + COALESCE(sa.bets_n, 0) AS bets_n,
@@ -1568,10 +1587,11 @@ def leaderboard(limit: int = 100) -> list[dict]:
           WHERE status='active'
           GROUP BY lender_id
         ) rec ON rec.lender_id = u.id
+        {where}
         GROUP BY u.id ORDER BY (u.balance
             + COALESCE(ba.in_play, 0) + COALESCE(sa.in_play, 0)
             - COALESCE(debt.debt, 0) + COALESCE(rec.receivable, 0)) DESC
-        LIMIT ?""", (limit,)).fetchall()
+        LIMIT ? OFFSET ?""", (*params, limit, offset)).fetchall()
     # 一次性拉全部预测，内存按选手分组算标签——避免每个 agent 单独查库（N+1）
     bets_by_user: dict[int, list] = {}
     for b in conn.execute("SELECT user_id, pick, stake, odds, settled, payout "
@@ -1597,6 +1617,17 @@ def leaderboard(limit: int = 100) -> list[dict]:
     return out
 
 
+def leaderboard_count(kind: str | None = None) -> int:
+    conn = connect()
+    if kind in {"agent", "human"}:
+        row = conn.execute("SELECT COUNT(*) AS n FROM users WHERE kind=?",
+                           (kind,)).fetchone()
+    else:
+        row = conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()
+    conn.close()
+    return int(row["n"] if row else 0)
+
+
 def match_bets(match_no: int, agents_only: bool = False) -> list[dict]:
     conn = connect()
     where = "WHERE match_no=?"
@@ -1609,14 +1640,16 @@ def match_bets(match_no: int, agents_only: bool = False) -> list[dict]:
                  NULL AS home_score, NULL AS away_score,
                  b.stake, b.odds, b.settled, b.payout, b.placed_at,
                  b.reason,
-                 u.id AS user_id, u.kind, u.login, u.name, u.avatar_url, u.model
+                 u.id AS user_id, u.kind, u.login, u.name, u.avatar_url,
+                 u.model, u.persona
           FROM bets b JOIN users u ON u.id = b.user_id
           UNION ALL
           SELECT b.id, 'score' AS bet_type, b.match_no, 'S' AS pick,
                  b.home_score, b.away_score,
                  b.stake, b.odds, b.settled, b.payout, b.placed_at,
                  b.reason,
-                 u.id AS user_id, u.kind, u.login, u.name, u.avatar_url, u.model
+                 u.id AS user_id, u.kind, u.login, u.name, u.avatar_url,
+                 u.model, u.persona
           FROM score_bets b JOIN users u ON u.id = b.user_id
         ) """ + where + " ORDER BY placed_at", params).fetchall()
     conn.close()
@@ -2428,14 +2461,16 @@ def recent_agent_bets(limit: int = 100, offset: int = 0) -> list[dict]:
           SELECT b.id, 'outcome' AS bet_type, b.match_no, b.pick,
                  NULL AS home_score, NULL AS away_score,
                  b.stake, b.odds, b.settled, b.payout, b.placed_at,
-                 b.reason, u.kind, u.login, u.name, u.avatar_url, u.model
+                 b.reason, u.kind, u.login, u.name, u.avatar_url, u.model,
+                 u.persona
           FROM bets b JOIN users u ON u.id=b.user_id
           WHERE u.kind='agent'
           UNION ALL
           SELECT b.id, 'score' AS bet_type, b.match_no, 'S' AS pick,
                  b.home_score, b.away_score,
                  b.stake, b.odds, b.settled, b.payout, b.placed_at,
-                 b.reason, u.kind, u.login, u.name, u.avatar_url, u.model
+                 b.reason, u.kind, u.login, u.name, u.avatar_url, u.model,
+                 u.persona
           FROM score_bets b JOIN users u ON u.id=b.user_id
           WHERE u.kind='agent'
         ) ORDER BY placed_at DESC, id DESC LIMIT ? OFFSET ?""",
@@ -2459,6 +2494,297 @@ def recent_agent_bets_count() -> int:
     """).fetchone()
     conn.close()
     return int(row["n"] or 0)
+
+
+def _review_cutoff(lookback_hours: int) -> str:
+    seconds = max(1, int(lookback_hours or 30)) * 3600
+    return time.strftime("%Y-%m-%d %H:%M:%S",
+                         time.localtime(time.time() - seconds))
+
+
+def _agent_outcome_review_rows(conn: sqlite3.Connection,
+                               cutoff: str | None = None) -> list[dict]:
+    where = ["u.kind='agent'", "b.settled=1"]
+    params: list = []
+    if cutoff:
+        where.append("COALESCE(b.settled_at, b.placed_at) >= ?")
+        params.append(cutoff)
+    rows = conn.execute(f"""
+        SELECT b.id, 'outcome' AS bet_type, b.match_no, b.pick,
+               b.stake, b.odds, COALESCE(b.payout, 0) AS payout,
+               b.placed_at, b.settled_at, b.reason,
+               u.login, u.name, u.model, u.persona,
+               m.stage, m.round, m.home, m.away, m.score_home, m.score_away
+        FROM bets b
+        JOIN users u ON u.id=b.user_id
+        JOIN matches m ON m.match_no=b.match_no
+        WHERE {" AND ".join(where)}
+    """, params).fetchall()
+    return [dict(r) for r in rows]
+
+
+def _agent_score_review_rows(conn: sqlite3.Connection,
+                             cutoff: str | None = None) -> list[dict]:
+    where = ["u.kind='agent'", "b.settled=1"]
+    params: list = []
+    if cutoff:
+        where.append("COALESCE(b.settled_at, b.placed_at) >= ?")
+        params.append(cutoff)
+    rows = conn.execute(f"""
+        SELECT b.id, 'score' AS bet_type, b.match_no, 'S' AS pick,
+               b.home_score, b.away_score,
+               b.stake, b.odds, COALESCE(b.payout, 0) AS payout,
+               b.placed_at, b.settled_at, b.reason,
+               u.login, u.name, u.model, u.persona,
+               m.stage, m.round, m.home, m.away, m.score_home, m.score_away
+        FROM score_bets b
+        JOIN users u ON u.id=b.user_id
+        JOIN matches m ON m.match_no=b.match_no
+        WHERE {" AND ".join(where)}
+    """, params).fetchall()
+    return [dict(r) for r in rows]
+
+
+def _betting_summary(rows: list[dict]) -> dict:
+    stake = sum(float(r.get("stake") or 0) for r in rows)
+    payout = sum(float(r.get("payout") or 0) for r in rows)
+    hits = sum(1 for r in rows if float(r.get("payout") or 0) > 0)
+    profit = payout - stake
+    return {
+        "n": len(rows),
+        "hits": hits,
+        "hit_rate": round(hits / len(rows), 3) if rows else None,
+        "stake": round(stake, 2),
+        "payout": round(payout, 2),
+        "profit": round(profit, 2),
+        "roi": round(profit / stake, 3) if stake else None,
+        "avg_stake": round(stake / len(rows), 2) if rows else None,
+    }
+
+
+def _odds_bucket(row: dict) -> str:
+    odds = float(row.get("odds") or 0)
+    if odds < 1.5:
+        return "<1.5"
+    if odds < 2.0:
+        return "1.5-2"
+    if odds < 3.0:
+        return "2-3"
+    if odds < 5.0:
+        return "3-5"
+    return ">=5"
+
+
+def _stake_bucket(row: dict) -> str:
+    stake = float(row.get("stake") or 0)
+    if stake <= 20:
+        return "<=20"
+    if stake <= 50:
+        return "21-50"
+    if stake <= 100:
+        return "51-100"
+    return ">100"
+
+
+def _strategy_group(row: dict) -> str:
+    return "策略组" if str(row.get("persona") or "").strip() else "本色组"
+
+
+def _group_summaries(rows: list[dict], key_fn,
+                     order: list[str] | None = None) -> list[dict]:
+    grouped: dict[str, list[dict]] = {}
+    for row in rows:
+        key = str(key_fn(row) or "未知")
+        grouped.setdefault(key, []).append(row)
+    out = []
+    for key, items in grouped.items():
+        summary = _betting_summary(items)
+        summary["key"] = key
+        out.append(summary)
+    if order:
+        rank = {k: i for i, k in enumerate(order)}
+        out.sort(key=lambda item: rank.get(item["key"], len(rank)))
+    else:
+        out.sort(key=lambda item: (item["profit"], item["stake"]))
+    return out
+
+
+def _roi_text(value: float | None) -> str:
+    if value is None:
+        return "n/a"
+    return f"{value * 100:+.1f}%"
+
+
+def _short_metric(row: dict) -> str:
+    return (f"{row['key']} {row['n']}注 ROI {_roi_text(row.get('roi'))} "
+            f"盈亏 {row.get('profit'):+g}")
+
+
+def _betting_lessons(metrics: dict) -> list[str]:
+    lessons: list[str] = []
+    by_pick = {r["key"]: r for r in metrics.get("by_pick", [])}
+    away = by_pick.get("A")
+    if away and (away.get("roi") or 0) < -0.25:
+        lessons.append("客胜需要更高证据门槛；没有阵容/赛程/市场错位支撑时只用小仓。")
+    draw = by_pick.get("D")
+    if draw and (draw.get("roi") or 0) > -0.05:
+        lessons.append("平局并非禁区，但只能在低总球、保守赛况或市场低估时小仓切入。")
+    stake_rows = {r["key"]: r for r in metrics.get("by_stake", [])}
+    big = stake_rows.get(">100")
+    small = stake_rows.get("<=20")
+    if big and (big.get("roi") or 0) < -0.2:
+        lessons.append("重仓是当前主要风险源；强制覆盖用 10-20，普通判断不轻易越过 60。")
+    if small and big and (small.get("roi") or -1) > (big.get("roi") or -1):
+        lessons.append("小仓覆盖比硬上重仓更稳；加仓必须写清新增证据，而不是重复同一理由。")
+    by_group = {r["key"]: r for r in metrics.get("by_group", [])}
+    persona = by_group.get("策略组")
+    native = by_group.get("本色组")
+    if persona and native and (persona.get("roi") or 0) < (native.get("roi") or 0) - 0.12:
+        lessons.append("策略组保留性格，但仓位必须服从统一防爆；嘴硬不等于加码。")
+    score = metrics.get("score_summary") or {}
+    outcome = metrics.get("outcome_summary") or {}
+    if score.get("n") and outcome.get("n"):
+        lessons.append("比分和胜平负可同场并存；比分只做 10-15 分小票，不替代主判断。")
+    if not lessons:
+        lessons.append("样本暂未暴露单一灾区；继续按小仓覆盖、证据加仓、失手降噪执行。")
+    return lessons[:5]
+
+
+def _betting_review_text(metrics: dict) -> str:
+    by_pick = " / ".join(_short_metric(r) for r in metrics.get("by_pick", []))
+    by_odds = " / ".join(_short_metric(r) for r in metrics.get("by_odds", []))
+    by_stake = " / ".join(_short_metric(r) for r in metrics.get("by_stake", []))
+    worst_ai = "; ".join(_short_metric(r) for r in metrics.get("ai_worst", [])[:3])
+    worst_model = "; ".join(_short_metric(r) for r in metrics.get("model_worst", [])[:3])
+    outcome = metrics.get("outcome_summary") or {}
+    score = metrics.get("score_summary") or {}
+    return "\n".join([
+        f"样本：{metrics.get('sample_label')}。",
+        (f"胜平负：{outcome.get('n', 0)}注，ROI {_roi_text(outcome.get('roi'))}，"
+         f"盈亏 {outcome.get('profit', 0):+g}；"
+         f"比分：{score.get('n', 0)}注，ROI {_roi_text(score.get('roi'))}，"
+         f"盈亏 {score.get('profit', 0):+g}。"),
+        f"方向ROI：{by_pick or '暂无'}。",
+        f"赔率段ROI：{by_odds or '暂无'}。",
+        f"金额段ROI：{by_stake or '暂无'}。",
+        f"AI风险：{worst_ai or '暂无'}。",
+        f"模型风险：{worst_model or '暂无'}。",
+        "下一轮纪律：" + "；".join(metrics.get("lessons") or []),
+    ])
+
+
+def generate_betting_review(review_date: str | None = None,
+                            lookback_hours: int = 30) -> dict:
+    """生成并保存每日 Agent 投注复盘，供下一轮 agent 上下文读取。"""
+    lookback_hours = max(1, int(lookback_hours or 30))
+    review_date = review_date or now()[:10]
+    cutoff = _review_cutoff(lookback_hours)
+    conn = connect()
+    try:
+        recent_outcome = _agent_outcome_review_rows(conn, cutoff)
+        recent_score = _agent_score_review_rows(conn, cutoff)
+        all_outcome = _agent_outcome_review_rows(conn)
+        all_score = _agent_score_review_rows(conn)
+    finally:
+        conn.close()
+
+    recent_n = len(recent_outcome) + len(recent_score)
+    use_recent = recent_n >= 8
+    outcome_rows = recent_outcome if use_recent else all_outcome
+    score_rows = recent_score if use_recent else all_score
+    sample_label = (
+        f"最近{lookback_hours}小时已结算"
+        if use_recent else f"累计已结算（最近{lookback_hours}小时样本不足）"
+    )
+
+    by_agent = _group_summaries(outcome_rows, lambda r: r.get("login"))
+    by_model = _group_summaries(outcome_rows, lambda r: r.get("model"))
+    metrics = {
+        "review_date": review_date,
+        "generated_at": now(),
+        "lookback_hours": lookback_hours,
+        "settled_after": cutoff,
+        "sample_label": sample_label,
+        "recent_counts": {
+            "outcome": len(recent_outcome),
+            "score": len(recent_score),
+        },
+        "outcome_summary": _betting_summary(outcome_rows),
+        "score_summary": _betting_summary(score_rows),
+        "by_pick": _group_summaries(outcome_rows, lambda r: r.get("pick"),
+                                    ["H", "D", "A"]),
+        "by_odds": _group_summaries(outcome_rows, _odds_bucket,
+                                    ["<1.5", "1.5-2", "2-3", "3-5", ">=5"]),
+        "by_stake": _group_summaries(outcome_rows, _stake_bucket,
+                                     ["<=20", "21-50", "51-100", ">100"]),
+        "by_group": _group_summaries(outcome_rows, _strategy_group,
+                                     ["本色组", "策略组"]),
+        "ai_best": sorted(by_agent, key=lambda x: x["profit"], reverse=True)[:5],
+        "ai_worst": sorted(by_agent, key=lambda x: x["profit"])[:5],
+        "model_best": sorted(by_model, key=lambda x: x["profit"], reverse=True)[:5],
+        "model_worst": sorted(by_model, key=lambda x: x["profit"])[:5],
+    }
+    metrics["lessons"] = _betting_lessons(metrics)
+    summary_text = _betting_review_text(metrics)
+
+    with transaction() as conn:
+        conn.execute("""
+            INSERT INTO betting_reviews
+              (review_date, generated_at, lookback_hours, settled_after,
+               settled_bets, score_bets, summary_text, metrics_json)
+            VALUES (?,?,?,?,?,?,?,?)
+            ON CONFLICT(review_date) DO UPDATE SET
+              generated_at=excluded.generated_at,
+              lookback_hours=excluded.lookback_hours,
+              settled_after=excluded.settled_after,
+              settled_bets=excluded.settled_bets,
+              score_bets=excluded.score_bets,
+              summary_text=excluded.summary_text,
+              metrics_json=excluded.metrics_json
+        """, (review_date, metrics["generated_at"], lookback_hours, cutoff,
+              len(recent_outcome), len(recent_score), summary_text,
+              json.dumps(metrics, ensure_ascii=False)))
+    return {"summary_text": summary_text, "metrics": metrics}
+
+
+def latest_betting_review() -> dict | None:
+    conn = connect()
+    row = conn.execute("""
+        SELECT * FROM betting_reviews
+        ORDER BY generated_at DESC, review_date DESC
+        LIMIT 1
+    """).fetchone()
+    conn.close()
+    if not row:
+        return None
+    out = dict(row)
+    try:
+        out["metrics"] = json.loads(out.get("metrics_json") or "{}")
+    except json.JSONDecodeError:
+        out["metrics"] = {}
+    return out
+
+
+def betting_review_context() -> dict | None:
+    review = latest_betting_review()
+    if not review:
+        return None
+    metrics = review.get("metrics") or {}
+    return {
+        "生成时间": review.get("generated_at"),
+        "样本": metrics.get("sample_label"),
+        "胜平负总体": metrics.get("outcome_summary"),
+        "比分总体": metrics.get("score_summary"),
+        "按方向ROI": metrics.get("by_pick"),
+        "按赔率段ROI": metrics.get("by_odds"),
+        "按金额段ROI": metrics.get("by_stake"),
+        "按策略组ROI": metrics.get("by_group"),
+        "AI风险榜": metrics.get("ai_worst"),
+        "AI正向样本": metrics.get("ai_best"),
+        "模型风险榜": metrics.get("model_worst"),
+        "下一轮纪律": metrics.get("lessons"),
+        "摘要": review.get("summary_text"),
+    }
 
 
 def agent_action_add(agent_id: int | None, agent_login: str, action: str,
@@ -2509,8 +2835,11 @@ def user_bets(user_id: int) -> list[dict]:
                  NULL AS home_score_pick, NULL AS away_score_pick,
                  b.stake, b.odds, b.placed_at, b.settled, b.payout,
                  b.settled_at, b.reason,
-                 m.home, m.away, m.date_utc, m.score_home, m.score_away
-          FROM bets b JOIN matches m ON m.match_no = b.match_no
+                 m.home, m.away, m.date_utc, m.score_home, m.score_away,
+                 u.kind, u.login, u.name, u.avatar_url, u.model, u.persona
+          FROM bets b
+          JOIN matches m ON m.match_no = b.match_no
+          JOIN users u ON u.id = b.user_id
           WHERE b.user_id=?
           UNION ALL
           SELECT b.id, 'score' AS bet_type, b.user_id, b.match_no, 'S' AS pick,
@@ -2518,8 +2847,11 @@ def user_bets(user_id: int) -> list[dict]:
                  b.away_score AS away_score_pick,
                  b.stake, b.odds, b.placed_at, b.settled, b.payout,
                  b.settled_at, b.reason,
-                 m.home, m.away, m.date_utc, m.score_home, m.score_away
-          FROM score_bets b JOIN matches m ON m.match_no = b.match_no
+                 m.home, m.away, m.date_utc, m.score_home, m.score_away,
+                 u.kind, u.login, u.name, u.avatar_url, u.model, u.persona
+          FROM score_bets b
+          JOIN matches m ON m.match_no = b.match_no
+          JOIN users u ON u.id = b.user_id
           WHERE b.user_id=?
         ) ORDER BY placed_at DESC""", (user_id, user_id)).fetchall()
     conn.close()

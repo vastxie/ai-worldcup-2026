@@ -512,10 +512,14 @@ def match_posts(match_no: int):
 
 
 @app.get("/api/leaderboard")
-def get_leaderboard(request: Request):
-    rows = db.leaderboard(100)
-    if not session_user(request):
-        rows = [r for r in rows if r["kind"] == "agent"]
+def get_leaderboard(request: Request, limit: int = 100, offset: int = 0,
+                    with_total: bool = False):
+    limit = max(1, min(int(limit or 100), 500))
+    offset = max(0, int(offset or 0))
+    kind = None if session_user(request) else "agent"
+    rows = db.leaderboard(limit, offset=offset, kind=kind)
+    if with_total:
+        return {"items": rows, "total": db.leaderboard_count(kind=kind)}
     return rows
 
 

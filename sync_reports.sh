@@ -67,4 +67,4 @@ PY
 scp -q "$JSON" "$SERVER:/tmp/wc_content.json"
 scp -q "$APPLY" "$SERVER:/tmp/wc_apply.py"
 ssh "$SERVER" "cd '$DEST' && .venv/bin/python /tmp/wc_apply.py && rm -f /tmp/wc_content.json /tmp/wc_apply.py"
-echo "✓ 已同步到 $SERVER；reports.js / blurbs.js 已刷新（前端 Cmd+Shift+R 可见）"
+echo "✓ 已同步到 ${SERVER}；reports.js / blurbs.js 已刷新（前端 Cmd+Shift+R 可见）"

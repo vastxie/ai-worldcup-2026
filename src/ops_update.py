@@ -88,6 +88,22 @@ def run_pipeline(args: argparse.Namespace) -> dict:
         force_publish=args.force_publish,
         publish_content=False,
     )
+    betting_review = None
+    if not args.dry_run:
+        try:
+            review = db.generate_betting_review()
+            metrics = review.get("metrics") or {}
+            betting_review = {
+                "date": metrics.get("review_date"),
+                "sample": metrics.get("sample_label"),
+                "outcome_roi": (metrics.get("outcome_summary") or {}).get("roi"),
+                "score_roi": (metrics.get("score_summary") or {}).get("roi"),
+            }
+            print("  [ops] 投注复盘已更新: "
+                  + json.dumps(betting_review, ensure_ascii=False))
+        except Exception as exc:  # noqa: BLE001 - 复盘不阻断硬数据更新
+            betting_review = {"error": str(exc)[:160]}
+            print(f"  [ops] 投注复盘更新失败: {str(exc)[:160]}")
     after = _snapshot()
     events = {
         "new_finished": max(0, int(payload["meta"]["played"]) - before["played"]),
@@ -96,6 +112,7 @@ def run_pipeline(args: argparse.Namespace) -> dict:
         "market": payload["meta"].get("market", False),
         "content_generated": False,
         "agent_rounds": 0,
+        "betting_review": betting_review,
     }
 
     record = {

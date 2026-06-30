@@ -416,9 +416,11 @@ def main() -> None:
                         help="用临时数据库计算，不写入发布产物")
     parser.add_argument("--force-publish", action="store_true",
                         help="允许覆盖已赛场次/模拟次数更高的现有产物")
+    parser.add_argument("--no-content", action="store_true",
+                        help="只发布数据和已有内容，不生成新战报/看点")
     args = parser.parse_args()
     run(args.sims, args.seed, not args.no_fetch, args.workers,
-        args.dry_run, args.force_publish)
+        args.dry_run, args.force_publish, publish_content=not args.no_content)
 
 
 if __name__ == "__main__":

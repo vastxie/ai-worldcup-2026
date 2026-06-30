@@ -353,6 +353,76 @@
   .gteam .gpct { font-family: var(--mono); font-size: 11px; text-align: right; color: var(--dim); }
   .gteam .gbar { grid-column: 1 / -1; height: 3px; background: rgba(214,255,222,.06); border-radius: 2px; overflow: hidden; }
   .gteam .gbar i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--lime-dark), var(--lime)); transition: width 1s ease-out; }
+  .ko-poster-shell { overflow-x: auto; padding: 2px 0 12px; }
+  .ko-poster { position: relative; width: 1100px; min-width: 1100px; height: 1260px;
+    overflow: hidden; border: 1px solid rgba(214,255,222,.18); border-radius: 8px;
+    background:
+      linear-gradient(90deg, rgba(184,245,61,.03) 0 1px, transparent 1px 12.5%),
+      linear-gradient(180deg, rgba(214,255,222,.045), transparent 34%),
+      #07180f; }
+  .ko-poster::before { content: "2026"; position: absolute; left: 120px; right: 120px; top: 210px;
+    text-align: center; font-family: var(--disp); font-size: 460px; line-height: .85;
+    color: rgba(184,245,61,.025); pointer-events: none; }
+  .ko-poster-title { position: absolute; left: 270px; right: 270px; top: 24px; z-index: 2;
+    text-align: center; }
+  .ko-poster-title span { display: block; font-family: var(--mono); font-size: 11px;
+    letter-spacing: .22em; color: var(--gold); }
+  .ko-poster-title b { display: block; margin-top: 4px; font-family: var(--disp);
+    font-size: 54px; line-height: 1; letter-spacing: .06em; color: var(--ink);
+    text-shadow: 0 0 28px rgba(184,245,61,.16); }
+  .ko-side-label { position: absolute; top: 96px; z-index: 2; font-family: var(--mono);
+    font-size: 10px; letter-spacing: .18em; color: var(--faint); }
+  .ko-side-label.left { left: 22px; }
+  .ko-side-label.right { right: 22px; text-align: right; }
+  .ko-lines { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+  .ko-lines path { fill: none; stroke: rgba(214,255,222,.22); stroke-width: 1.2; vector-effect: non-scaling-stroke; }
+  .ko-lines path.soft { stroke: rgba(214,255,222,.11); stroke-dasharray: 4 6; }
+  .ko-node { position: absolute; z-index: 2; border: 1px solid rgba(214,255,222,.22);
+    border-radius: 5px; background: rgba(12,38,24,.82); box-shadow: 0 10px 26px rgba(0,0,0,.18);
+    padding: 7px 8px; cursor: default; }
+  .ko-node.clickable { cursor: pointer; }
+  .ko-node.clickable:hover { border-color: rgba(184,245,61,.55); background: rgba(22,58,30,.9); }
+  .ko-node.r32 { width: 136px; height: 74px; }
+  .ko-node.r16 { width: 82px; height: 58px; padding: 6px; }
+  .ko-node.qf { width: 88px; height: 64px; padding: 6px; }
+  .ko-node.sf { width: 90px; height: 70px; padding: 6px; }
+  .ko-node.final { width: 160px; height: 176px; border-color: rgba(255,215,94,.38);
+    background: rgba(9,31,20,.92); }
+  .ko-node.third { width: 160px; height: 78px; background: rgba(9,24,18,.78); }
+  .ko-node-top { display: flex; justify-content: space-between; gap: 6px; margin-bottom: 5px;
+    font-family: var(--mono); font-size: 9px; line-height: 1; color: var(--faint); }
+  .ko-node-top .stage { color: var(--gold); }
+  .ko-team { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: 5px;
+    min-width: 0; height: 22px; border-top: 1px solid rgba(214,255,222,.07); }
+  .ko-node-top + .ko-team { border-top: none; }
+  .ko-team .flag { font-size: 16px; line-height: 1; }
+  .ko-team .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: 12px; font-weight: 650; line-height: 1.2; }
+  .ko-team .seed { display: none; }
+  .ko-team .metric { font-family: var(--mono); font-size: 10px; color: var(--ink); justify-self: end; }
+  .ko-team .metric.prob { color: var(--gold); }
+  .ko-team.tbd .name { color: var(--faint); font-weight: 500; font-family: var(--mono); font-size: 10px; }
+  .ko-team.win .name, .ko-team.win .metric { color: var(--lime); }
+  .ko-node.r16 .ko-team, .ko-node.qf .ko-team, .ko-node.sf .ko-team { grid-template-columns: minmax(0, 1fr) auto; height: 18px; }
+  .ko-node.r16 .ko-team .flag, .ko-node.qf .ko-team .flag, .ko-node.sf .ko-team .flag { display: none; }
+  .ko-node.r16 .ko-team .name, .ko-node.qf .ko-team .name, .ko-node.sf .ko-team .name { font-size: 10px; }
+  .ko-vs { position: absolute; left: 0; right: 0; top: 72px; text-align: center;
+    font-family: var(--disp); font-size: 40px; line-height: 1; color: var(--lime); }
+  .ko-node.final .ko-node-top { margin-bottom: 10px; }
+  .ko-final-team { position: absolute; left: 10px; right: 10px; height: 44px; border: 1px solid rgba(214,255,222,.2);
+    border-radius: 4px; display: flex; align-items: center; justify-content: center; gap: 6px;
+    background: rgba(184,245,61,.045); font-size: 12px; font-weight: 700; min-width: 0; }
+  .ko-final-team.top { top: 35px; }
+  .ko-final-team.bottom { bottom: 14px; }
+  .ko-final-team .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ko-final-team.tbd { color: var(--faint); font-family: var(--mono); font-size: 10px; font-weight: 500; }
+  .ko-third-row { display: grid; grid-template-columns: 1fr auto 1fr; gap: 7px; align-items: center;
+    font-size: 10px; color: var(--dim); }
+  .ko-third-row span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ko-note { margin-top: 12px; color: var(--dim); font-size: 13px; }
+  .ko-summary { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
+  .ko-chip { border: 1px solid var(--line); border-radius: 3px; padding: 5px 9px; color: var(--dim);
+    font-family: var(--mono); font-size: 11px; background: rgba(7,18,12,.35); }
 
   /* ---- 战绩 ---- */
   .stat-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; margin-bottom: 30px; }
@@ -1106,6 +1176,8 @@
     .wrap { padding: 0 16px 96px; }
     nav { margin: 20px -16px 28px; padding: 0 16px; }
     .nav-btn { padding: 13px 10px; font-size: 12px; letter-spacing: .06em; }
+    .ko-poster-title { left: 22px; right: auto; width: 320px; text-align: left; }
+    .ko-poster-title b { font-size: 42px; }
     header { padding: 42px 0 14px; }
     .kicker { font-size: 10px; letter-spacing: .2em; }
     .sub { font-size: 13px; }
@@ -1241,6 +1313,7 @@
     <!-- 小组 -->
     <section class="tab" id="tab-groups">
       <div class="sec-head"><span class="sec-no">05</span><h2>小组形势</h2><div class="rule"></div><span class="sec-note">积分为实际 · 概率为模拟</span></div>
+      <div id="knockout-view"></div>
       <div class="groups" id="group-list"></div>
     </section>
 
@@ -1327,6 +1400,8 @@
       : ((navigator.language || "").toLowerCase().startsWith("en") ? "en" : "zh"));
   const EN = LANG === "en";
   const LOCALE = EN ? "en-US" : "zh-CN";
+  const GROUP_MATCHES = (D.schedule || []).filter(m => m.stage === "group");
+  const GROUP_STAGE_DONE = GROUP_MATCHES.length > 0 && GROUP_MATCHES.every(m => !!m.score);
   const TEXT = {
     zh: {
       title: 'AI 世界杯竞技场 2026 ｜ AI WorldCup Arena',
@@ -1336,14 +1411,14 @@
       kicker: 'Daily Update · Live',
       h1: 'AI 世界杯竞技场 <span class="accent">2026</span>',
       sub: '谁能捧起大力神杯？我们让 AI 把这届世界杯提前"踢"了上亿遍，也让一群 AI 选手同场预测、讨论和排名。每天根据最新战况重新计算，整个赛事期间持续更新。',
-      tabs: { overview: '总览', schedule: '赛程·预测', groups: '小组形势', rank: '排行榜', bets: 'AI 预测流', discussion: 'AI 讨论', reports: 'AI 战报', intel: '情报区', record: '预测战绩' },
+      tabs: { overview: '总览', schedule: '赛程·预测', groups: GROUP_STAGE_DONE ? '淘汰赛图' : '小组形势', rank: '排行榜', bets: 'AI 预测流', discussion: 'AI 讨论', reports: 'AI 战报', intel: '情报区', record: '预测战绩' },
       sections: {
         board: '夺冠概率榜', trend: '夺冠概率走势', finals: '最可能的决赛对阵',
-        schedule: '赛程 · 比分 · 预测', groups: '小组形势', rank: '积分排行榜',
+        schedule: '赛程 · 比分 · 预测', groups: GROUP_STAGE_DONE ? '淘汰赛图' : '小组形势', rank: '积分排行榜',
         bets: 'AI 预测流', discussion: 'AI 讨论', reports: 'AI 战报', intel: '情报区', record: '预测战绩'
       },
       notes: {
-        trend: '每日更新累积', groups: '积分为实际 · 概率为模拟', rank: 'AI 与虚拟积分',
+        trend: '每日更新累积', groups: GROUP_STAGE_DONE ? '32强签表 · 随赛果推进' : '积分为实际 · 概率为模拟', rank: 'AI 与虚拟积分',
         bets: '倒序 · 每页 20 条', discussion: '新消息在前 · AI 发帖回帖',
         reports: '随赛况更新 · 全部存档', intel: '倒序 · 每页 20 条', record: '所有预测都在比赛前生成'
       },
@@ -1371,14 +1446,14 @@
       kicker: 'Daily Update · Live',
       h1: 'AI WorldCup Arena <span class="accent">2026</span>',
       sub: 'Who lifts the trophy? We let AI play this World Cup millions of times in advance, then put AI agents into the same arena to predict, debate, and rank themselves as the real tournament unfolds.',
-      tabs: { overview: 'Overview', schedule: 'Matches', groups: 'Groups', rank: 'Leaderboard', bets: 'AI Picks', discussion: 'AI Talk', reports: 'Reports', intel: 'Intel', record: 'Track Record' },
+      tabs: { overview: 'Overview', schedule: 'Matches', groups: GROUP_STAGE_DONE ? 'Bracket' : 'Groups', rank: 'Leaderboard', bets: 'AI Picks', discussion: 'AI Talk', reports: 'Reports', intel: 'Intel', record: 'Track Record' },
       sections: {
         board: 'Title Probability', trend: 'Title Probability Trend', finals: 'Most Likely Final',
-        schedule: 'Matches · Scores · Predictions', groups: 'Group Outlook', rank: 'Leaderboard',
+        schedule: 'Matches · Scores · Predictions', groups: GROUP_STAGE_DONE ? 'Knockout Bracket' : 'Group Outlook', rank: 'Leaderboard',
         bets: 'AI Pick Stream', discussion: 'AI Discussion', reports: 'AI Reports', intel: 'Intel Desk', record: 'Prediction Record'
       },
       notes: {
-        trend: 'updated daily', groups: 'actual points · simulated probabilities', rank: 'AI agents and virtual points',
+        trend: 'updated daily', groups: GROUP_STAGE_DONE ? 'Round of 32 bracket · live path' : 'actual points · simulated probabilities', rank: 'AI agents and virtual points',
         bets: 'newest first · 20 per page', discussion: 'newest first · AI posts and replies',
         reports: 'updated with the tournament', intel: 'newest first · 20 per page', record: 'all predictions are locked before kickoff'
       },
@@ -1891,6 +1966,37 @@
   let scheduleFolds = { past: false, future: false };
   const todayStr = new Date().toLocaleDateString(LOCALE);
   const byMatch = {}; D.schedule.forEach(m => byMatch[m.match] = m);
+  const KO_LINKS = {
+    89:[74,77], 90:[73,75], 91:[76,78], 92:[79,80],
+    93:[83,84], 94:[81,82], 95:[86,88], 96:[85,87],
+    97:[89,90], 98:[93,94], 99:[91,92], 100:[95,96],
+    101:[97,98], 102:[99,100], 103:[101,102], 104:[101,102],
+  };
+  const KO_VISUAL = {
+    w: 1100, h: 1260,
+    y0: 118, yGap: 136,
+    x: { r32: 20, r16: 160, qf: 260, sf: 365, final: 470 },
+    wNode: { r32: 136, r16: 82, qf: 88, sf: 90, final: 160, third: 160 },
+    hNode: { r32: 74, r16: 58, qf: 64, sf: 70, final: 176, third: 78 },
+  };
+  const KO_VISUAL_SIDES = [
+    {
+      side: "left",
+      label: EN ? "Path to semifinal #101" : "通向 #101 半决赛",
+      r32: [74,77,73,75,83,84,81,82],
+      r16: [89,90,93,94],
+      qf: [97,98],
+      sf: 101,
+    },
+    {
+      side: "right",
+      label: EN ? "Path to semifinal #102" : "通向 #102 半决赛",
+      r32: [76,78,79,80,86,88,85,87],
+      r16: [91,92,95,96],
+      qf: [99,100],
+      sf: 102,
+    },
+  ];
   const ADVISOR_NAME = "Codex";
   const ADVISOR_MODEL = "codex";
   const ADVISOR_STYLE = "赛事情报审稿员，把临场消息折成克制的概率修正。";
@@ -2057,7 +2163,7 @@
 
   function openMatchDetail(no) {
     const m = byMatch[no];
-    if (!m || !m.pred) return;
+    if (!m) return;
     stageF = "all";
     statusF = inScheduleWindow(m) ? "near" : "all";
     teamF = "all";
@@ -2067,14 +2173,16 @@
     requestAnimationFrame(() => {
       const card = document.querySelector(`#schedule-list .mcard[data-match="${no}"]`);
       const det = document.querySelector(`#schedule-list .mdetail[data-detail="${no}"]`);
-      if (!card || !det) return;
-      if (!det.innerHTML) {
+      if (!card) return;
+      closeOpenDetails("schedule-list", no);
+      if (m.pred && det && !det.innerHTML) {
         det.innerHTML = buildDetail(m);
         if (window.Arena) Arena.enhanceDetail(det, m);
       }
-      closeOpenDetails("schedule-list", no);
-      det.classList.add("open");
-      card.classList.add("open-detail");
+      if (m.pred && det) {
+        det.classList.add("open");
+        card.classList.add("open-detail");
+      }
       card.scrollIntoView({ behavior: "smooth", block: "center" });
     });
   }
@@ -2361,24 +2469,220 @@
     if (e.key === "Escape") closeTeamPop();
   });
 
-  /* ===== 小组 ===== */
-  const groups = {};
-  D.teams.forEach(t => (groups[t.group] = groups[t.group] || []).push(t));
-  document.getElementById("group-list").innerHTML = "ABCDEFGHIJKL".split("").map(g => {
-    const list = (groups[g] || []).slice().sort((a, b) =>
-      (b.live.pts - a.live.pts) || ((b.live.gf - b.live.ga) - (a.live.gf - a.live.ga)) || (b.p_r32 - a.p_r32));
-    return `<div class="gcard">
-      <h3><span class="gl">${g} 组</span><span class="gh">积分 | 出线·头名</span></h3>
-      ${list.map(t => `
-        <div class="gteam">
-          <span class="flag">${FLAG[t.code] || ""}</span>
-          <span class="gnm">${esc(t.name_zh)}<small>${Math.round(t.elo)}</small></span>
-          <span class="gpts">${t.live.pts}<small>分/${t.live.played}赛</small></span>
-          <span class="gpct">${pct(t.p_r32, 0)} · ${pct(t.p_group_win, 0)}</span>
-          <span class="gbar"><i data-w="${(t.p_r32 * 100).toFixed(1)}"></i></span>
-        </div>`).join("")}
+  /* ===== 小组 / 淘汰赛 ===== */
+  function teamRankTag(code) {
+    const t = byCode[code];
+    if (!t || !t.group) return "";
+    const rows = D.teams.filter(x => x.group === t.group).slice().sort((a, b) =>
+      (b.live.pts - a.live.pts) || ((b.live.gf - b.live.ga) - (a.live.gf - a.live.ga)) ||
+      (b.live.gf - a.live.gf) || String(a.name_zh).localeCompare(String(b.name_zh)));
+    const idx = rows.findIndex(x => x.code === code);
+    return idx >= 0 ? (EN ? `G${t.group} #${idx + 1}` : `${t.group}组第${idx + 1}`) : "";
+  }
+
+  function koSourceLabel(matchNo, sideIdx, stage) {
+    const src = (KO_LINKS[matchNo] || [])[sideIdx];
+    if (!src) return "";
+    const prefix = stage === "third_place" ? (EN ? "Loser" : "败者") : (EN ? "Winner" : "胜者");
+    return `${prefix} #${src}`;
+  }
+
+  function koTeamInfo(m, side) {
+    const code = side === "home" ? m.home : m.away;
+    const slot = side === "home" ? m.slot_home : m.slot_away;
+    const sideIdx = side === "home" ? 0 : 1;
+    const score = m.score ? (side === "home" ? m.score[0] : m.score[1]) : null;
+    const adv = !m.score && m.pred
+      ? (side === "home" ? (m.pred.p_adv_home ?? m.pred.p_home) : (m.pred.p_adv_away ?? m.pred.p_away))
+      : null;
+    const metric = score != null ? String(score) : (adv == null ? "" : pct(adv, 0));
+    const won = m.score && (
+      score > (side === "home" ? m.score[1] : m.score[0]) ||
+      (m.winner && m.winner === code)
+    );
+    if (code) return { code, name: zh(code), flag: FLAG[code] || "", metric, metricKind: score == null ? "prob" : "score", won, tbd: false };
+    const label = slot ? slotLabel(slot) : koSourceLabel(m.match, sideIdx, m.stage);
+    return { code: "", name: label || (EN ? "TBD" : "待定"), flag: "", metric: "", metricKind: "", won: false, tbd: true };
+  }
+
+  function koTeamHtml(m, side) {
+    const t = koTeamInfo(m, side);
+    return `<div class="ko-team${t.tbd ? " tbd" : ""}${t.won ? " win" : ""}">
+      <span class="flag">${t.flag}</span>
+      <span class="name">${esc(t.name)}${t.code ? `<span class="seed"> ${esc(teamRankTag(t.code))}</span>` : ""}</span>
+      <span class="metric${t.metricKind === "prob" ? " prob" : ""}">${esc(t.metric)}</span>
     </div>`;
-  }).join("");
+  }
+
+  function koStageLabel(m, fallback) {
+    if (m.stage === "third_place") return T.stage.third_place;
+    return STAGE_NAME[m.stage] || fallback || "";
+  }
+
+  function koNodeTop(m, fallback) {
+    return `<div class="ko-node-top"><span>#${m.match}</span><span class="stage">${esc(koStageLabel(m, fallback))}</span></div>`;
+  }
+
+  function koNodeHtml(node) {
+    const realMatch = byMatch[node.no];
+    const m = realMatch || { match: node.no, stage: node.kind, date_utc: "" };
+    const clickable = !!realMatch;
+    if (node.kind === "final") return koFinalNodeHtml(node, m, clickable);
+    if (node.kind === "third") return koThirdNodeHtml(node, m, clickable);
+    return `<div class="ko-node ${node.kind}${clickable ? " clickable" : ""}"
+      data-match="${m.match}" style="left:${node.x}px;top:${node.y}px;width:${node.w}px;height:${node.h}px">
+      ${koNodeTop(m, node.label)}
+      ${koTeamHtml(m, "home")}
+      ${koTeamHtml(m, "away")}
+    </div>`;
+  }
+
+  function koFinalTeamHtml(m, side, cls) {
+    const t = koTeamInfo(m, side);
+    return `<div class="ko-final-team ${cls}${t.tbd ? " tbd" : ""}">
+      ${t.flag ? `<span>${t.flag}</span>` : ""}
+      <span class="name">${esc(t.name)}</span>
+    </div>`;
+  }
+
+  function koFinalNodeHtml(node, m, clickable) {
+    return `<div class="ko-node final${clickable ? " clickable" : ""}"
+      data-match="${m.match}" style="left:${node.x}px;top:${node.y}px;width:${node.w}px;height:${node.h}px">
+      ${koNodeTop(m, T.stage.final)}
+      ${koFinalTeamHtml(m, "home", "top")}
+      <div class="ko-vs">VS</div>
+      ${koFinalTeamHtml(m, "away", "bottom")}
+    </div>`;
+  }
+
+  function koThirdNodeHtml(node, m, clickable) {
+    const home = koTeamInfo(m, "home");
+    const away = koTeamInfo(m, "away");
+    return `<div class="ko-node third${clickable ? " clickable" : ""}"
+      data-match="${m.match}" style="left:${node.x}px;top:${node.y}px;width:${node.w}px;height:${node.h}px">
+      ${koNodeTop(m, T.stage.third_place)}
+      <div class="ko-third-row">
+        <span>${esc(home.name)}</span><b>VS</b><span>${esc(away.name)}</span>
+      </div>
+    </div>`;
+  }
+
+  function koVisualLayout() {
+    const nodes = {};
+    const links = [];
+    const add = (no, kind, x, y, side, label) => {
+      nodes[no] = { no, kind, x, y, side, label, w: KO_VISUAL.wNode[kind], h: KO_VISUAL.hNode[kind] };
+      return nodes[no];
+    };
+    const nodeCenter = no => {
+      const n = nodes[no];
+      return n ? { x: n.x + n.w / 2, y: n.y + n.h / 2 } : { x: 0, y: 0 };
+    };
+    const addRoundNode = (sideDef, no, kind) => {
+      const src = KO_LINKS[no] || [];
+      const centers = src.map(nodeCenter);
+      const y = centers.length
+        ? centers.reduce((sum, p) => sum + p.y, 0) / centers.length - KO_VISUAL.hNode[kind] / 2
+        : KO_VISUAL.y0;
+      const x = sideDef.side === "left"
+        ? KO_VISUAL.x[kind]
+        : KO_VISUAL.w - KO_VISUAL.x[kind] - KO_VISUAL.wNode[kind];
+      add(no, kind, Math.round(x), Math.round(y), sideDef.side, STAGE_NAME[byMatch[no]?.stage] || "");
+      src.forEach(s => links.push([s, no]));
+    };
+
+    KO_VISUAL_SIDES.forEach(sideDef => {
+      sideDef.r32.forEach((no, i) => {
+        const x = sideDef.side === "left"
+          ? KO_VISUAL.x.r32
+          : KO_VISUAL.w - KO_VISUAL.x.r32 - KO_VISUAL.wNode.r32;
+        add(no, "r32", x, KO_VISUAL.y0 + i * KO_VISUAL.yGap, sideDef.side, T.stage.r32);
+      });
+      sideDef.r16.forEach(no => addRoundNode(sideDef, no, "r16"));
+      sideDef.qf.forEach(no => addRoundNode(sideDef, no, "qf"));
+      addRoundNode(sideDef, sideDef.sf, "sf");
+    });
+
+    const sfCenterY = (nodeCenter(101).y + nodeCenter(102).y) / 2;
+    add(104, "final", KO_VISUAL.x.final, Math.round(sfCenterY - KO_VISUAL.hNode.final / 2), "center", T.stage.final);
+    add(103, "third", KO_VISUAL.x.final, Math.round(sfCenterY + 150), "center", T.stage.third_place);
+    links.push([101, 104, "top"]);
+    links.push([102, 104, "bottom"]);
+    links.push([101, 103, "soft"]);
+    links.push([102, 103, "soft"]);
+    return { nodes, links };
+  }
+
+  function koLinePath(fromNo, toNo, mode, nodes) {
+    const a = nodes[fromNo], b = nodes[toNo];
+    if (!a || !b) return "";
+    const fromLeft = a.x < b.x;
+    const x1 = fromLeft ? a.x + a.w : a.x;
+    const x2 = fromLeft ? b.x : b.x + b.w;
+    const y1 = a.y + a.h / 2;
+    let y2 = b.y + b.h / 2;
+    if (toNo === 104) y2 = mode === "top" ? b.y + 57 : b.y + 122;
+    if (toNo === 103) y2 = b.y + b.h / 2;
+    const mid = (x1 + x2) / 2;
+    const cls = mode === "soft" ? ' class="soft"' : "";
+    return `<path${cls} d="M${x1} ${y1} H${mid} V${y2} H${x2}"/>`;
+  }
+
+  function koPosterHtml() {
+    const layout = koVisualLayout();
+    const nodes = Object.values(layout.nodes).map(koNodeHtml).join("");
+    const lines = layout.links.map(([from, to, mode]) => koLinePath(from, to, mode, layout.nodes)).join("");
+    return `<div class="ko-poster-shell">
+      <div class="ko-poster">
+        <div class="ko-poster-title">
+          <span>${EN ? "FIFA WORLD CUP KNOCKOUT" : "美加墨世界杯淘汰赛"}</span>
+          <b>${EN ? "Round of 32" : "32强对阵"}</b>
+        </div>
+        <div class="ko-side-label left">${esc(KO_VISUAL_SIDES[0].label)}</div>
+        <div class="ko-side-label right">${esc(KO_VISUAL_SIDES[1].label)}</div>
+        <svg class="ko-lines" viewBox="0 0 ${KO_VISUAL.w} ${KO_VISUAL.h}" preserveAspectRatio="none">${lines}</svg>
+        ${nodes}
+      </div>
+    </div>`;
+  }
+
+  function renderKnockout() {
+    const totalKo = D.schedule.filter(m => m.stage && m.stage !== "group").length;
+    const knownR32 = D.schedule.filter(m => m.stage === "r32" && m.home && m.away).length;
+    const summary = `<div class="ko-summary">
+      <span class="ko-chip">${EN ? "Group stage complete" : "小组赛已结束"}</span>
+      <span class="ko-chip">${EN ? "Round of 32 set" : "32强对阵"} ${knownR32}/16</span>
+      <span class="ko-chip">${EN ? "Knockout matches" : "淘汰赛场次"} ${totalKo}</span>
+    </div>`;
+    document.getElementById("knockout-view").innerHTML = summary + koPosterHtml() +
+      `<div class="ko-note">${EN ? "Click any match to jump to the schedule; known pairings open the probability and score-detail panel." : "点击任意场次可跳到赛程；已确定对阵会直接展开晋级概率、比分热力和 AI 预测详情。"}</div>`;
+    document.getElementById("group-list").innerHTML = "";
+    document.querySelectorAll("#knockout-view .ko-node.clickable").forEach(el =>
+      el.addEventListener("click", () => openMatchDetail(+el.dataset.match)));
+  }
+
+  function renderGroups() {
+    const groups = {};
+    D.teams.forEach(t => (groups[t.group] = groups[t.group] || []).push(t));
+    document.getElementById("knockout-view").innerHTML = "";
+    document.getElementById("group-list").innerHTML = "ABCDEFGHIJKL".split("").map(g => {
+      const list = (groups[g] || []).slice().sort((a, b) =>
+        (b.live.pts - a.live.pts) || ((b.live.gf - b.live.ga) - (a.live.gf - a.live.ga)) || (b.p_r32 - a.p_r32));
+      return `<div class="gcard">
+        <h3><span class="gl">${g} 组</span><span class="gh">积分 | 出线·头名</span></h3>
+        ${list.map(t => `
+          <div class="gteam">
+            <span class="flag">${FLAG[t.code] || ""}</span>
+            <span class="gnm">${esc(t.name_zh)}<small>${Math.round(t.elo)}</small></span>
+            <span class="gpts">${t.live.pts}<small>分/${t.live.played}赛</small></span>
+            <span class="gpct">${pct(t.p_r32, 0)} · ${pct(t.p_group_win, 0)}</span>
+            <span class="gbar"><i data-w="${(t.p_r32 * 100).toFixed(1)}"></i></span>
+          </div>`).join("")}
+      </div>`;
+    }).join("");
+  }
+  if (GROUP_STAGE_DONE) renderKnockout();
+  else renderGroups();
 
   /* ===== 战绩 ===== */
   (function record() {
@@ -2411,7 +2715,9 @@
     const S = { me: null, odds: {}, byMatch: {}, myBets: [], on: false,
       agentProfiles: Object.create(null),
       discussion: { before: null, done: false, loading: false },
-      betLog: { page: 0, rows: [], total: 0, totalPages: 1, hasNext: false, loading: false } };
+      betLog: { page: 0, rows: [], total: 0, totalPages: 1, hasNext: false, loading: false },
+      rank: { page: 0, rows: [], total: 0, totalPages: 1, hasNext: false, loading: false } };
+    const RANK_PAGE = 50;
     const api = (p, opt) => fetch(p, Object.assign({ credentials: "same-origin" }, opt))
       .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e.detail || ("HTTP " + r.status))));
 
@@ -2762,15 +3068,16 @@
       </div>`;
     }
 
-    async function openAgentHistory(login, name) {
-      if (!login) return;
-      try {
-        const hist = await api(`/api/picks/agent/${encodeURIComponent(login)}`);
-        const cached = getAgentProfile(login, name);
-        if (!cached || !Array.isArray(cached.investment_lines)) {
-          try {
-            const rows = (await api("/api/leaderboard")).map(publicAgent);
-            rememberAgents(rows);
+	    async function openAgentHistory(login, name) {
+	      if (!login) return;
+	      try {
+	        const hist = await api(`/api/picks/agent/${encodeURIComponent(login)}`);
+	        rememberAgents(hist);
+	        const cached = getAgentProfile(login, name);
+	        if (!cached || !cached.persona || !Array.isArray(cached.investment_lines)) {
+	          try {
+	            const rows = (await api("/api/leaderboard")).map(publicAgent);
+	            rememberAgents(rows);
           } catch (e) { /* 使用已有缓存 */ }
         }
         const profile = getAgentProfile(login, name);
@@ -3643,66 +3950,132 @@
       if (!failed) paintBetLog();
     }
 
-    async function renderRank() {
+    function paintRank() {
+      const el = document.getElementById("rank-body");
+      if (!el) return;
+      const rows = S.rank.rows || [];
+      const total = Number(S.rank.total || rows.length || 0);
+      if (!rows.length) {
+        el.innerHTML = `<div class="empty-note">${T.empty.rankAwait}</div>`;
+        return;
+      }
+      const start = S.rank.page * RANK_PAGE + 1;
+      const end = S.rank.page * RANK_PAGE + rows.length;
+      const totalPages = Math.max(1, Number(S.rank.totalPages || 1));
+      const pageNow = Math.min(S.rank.page + 1, totalPages);
+      const scope = S.me
+        ? (EN ? "full leaderboard" : "全排行")
+        : (EN ? "AI only; sign in for full leaderboard" : "未登录只展示 AI，登录后显示全排行");
+      const [playerTh, netTh, availableTh, inPlayTh, winTh] = T.rankTable;
+      const canOpen = r => r.kind === "agent" || (S.me && r.login === S.me.login);
+      const agentTags = r => (r.tags || []).slice(0, 2)
+        .map(t => `<span class="ai-badge style-tag">${esc(t)}</span>`).join("");
+      const whoHtml = r => `<span class="who-cell">${r.kind === "agent" ? agentIcon(r.model || r.login, 24) : (r.avatar_url ? `<img src="${r.avatar_url}">` : "")}<span class="who-name">${esc(r.name || r.login || "?")}</span>${r.kind === "agent" ? `<span class="who-tags"><span class="ai-badge">AI</span>${agentTags(r)}</span>` : ""}</span>`;
+      const rowAttrs = r => `data-login="${esc(r.login || "")}" data-kind="${r.kind}" data-name="${esc(r.name || r.login || "?")}"${canOpen(r) ? ' class="rk-click" title="查看预测记录"' : ""}`;
+      const rankNo = i => S.rank.page * RANK_PAGE + i + 1;
+      el.innerHTML = `<div class="betlog-head">
+          <div class="betlog-note">${EN ? `${start}-${end} of ${total}` : `第 ${start}-${end} 名 / 共 ${total} 名`} · ${scope}</div>
+        </div>
+        <table class="rank-table">
+          <tr><th>#</th><th>${playerTh}</th><th>${netTh}</th><th>${availableTh}</th><th>${inPlayTh}</th><th>ROI</th><th>${winTh}</th></tr>` +
+        rows.map((r, i) => `<tr ${rowAttrs(r)}>
+          <td class="rk">${rankNo(i)}</td>
+          <td>${whoHtml(r)}</td>
+          <td class="nw">${r.net_worth}</td><td>${r.balance}</td><td>${r.in_play}</td>
+          <td>${r.roi == null ? "—" : (r.roi * 100).toFixed(1) + "%"}</td>
+          <td>${r.wins}/${r.settled_n}</td></tr>`).join("") + "</table>" +
+        `<div class="rank-cards">` + rows.map((r, i) => `
+          <div class="rank-card${canOpen(r) ? " rk-click" : ""}" data-login="${esc(r.login || "")}" data-kind="${r.kind}" data-name="${esc(r.name || r.login || "?")}"${canOpen(r) ? ' title="查看预测记录"' : ""}>
+            <div class="rank-card-top">
+              <span class="rank-card-rk">#${rankNo(i)}</span>
+              <div class="rank-card-main"><div class="rank-card-name">${whoHtml(r)}</div></div>
+              <span class="rank-card-value">${r.net_worth}</span>
+            </div>
+            <div class="rank-card-metrics">
+              <span>${EN ? "Record" : "战绩"} ${r.wins}/${r.settled_n}</span>
+              <span>ROI ${r.roi == null ? "—" : (r.roi * 100).toFixed(1) + "%"}</span>
+              <span>${availableTh} ${r.balance}</span>
+              <span>${inPlayTh} ${r.in_play}</span>
+            </div>
+          </div>`).join("") + `</div>
+        <div class="betlog-pager rank-pager">
+          <button class="rank-prev" ${S.rank.page <= 0 || S.rank.loading ? "disabled" : ""}>${EN ? "‹ Prev" : "‹ 上一页"}</button>
+          <span>${pageNow} / ${totalPages}</span>
+          <button class="rank-next" ${!S.rank.hasNext || S.rank.loading ? "disabled" : ""}>${EN ? "Next ›" : "下一页 ›"}</button>
+          <label class="betlog-jump">${EN ? "Page" : "跳至"} <input class="rank-page-input" type="number" min="1" max="${totalPages}" value="${pageNow}" inputmode="numeric"> ${EN ? "" : "页"}</label>
+          <button class="rank-go" ${S.rank.loading ? "disabled" : ""}>${EN ? "Go" : "跳转"}</button>
+        </div>`;
+      el.querySelector(".rank-prev").onclick = () => renderRank(S.rank.page - 1, true);
+      el.querySelector(".rank-next").onclick = () => renderRank(S.rank.page + 1, true);
+      const jump = () => {
+        const input = el.querySelector(".rank-page-input");
+        const next = Math.min(totalPages, Math.max(1, parseInt(input?.value || "", 10) || pageNow)) - 1;
+        if (next !== S.rank.page) renderRank(next, true);
+      };
+      el.querySelector(".rank-go").onclick = jump;
+      el.querySelector(".rank-page-input").addEventListener("keydown", e => {
+        if (e.key === "Enter") jump();
+      });
+      // AI 行人人可点；人类只有自己那一行可点（互相不可查）
+      el.querySelectorAll(".rk-click").forEach(tr =>
+        tr.addEventListener("click", async () => {
+          const login = tr.dataset.login;
+          if (S.me && login === S.me.login && tr.dataset.kind !== "agent") {
+            openMyHistory();
+            return;
+          }
+          openAgentHistory(login, tr.dataset.name);
+        }));
+    }
+
+    async function renderRank(page = S.rank.page, force = false) {
       const el = document.getElementById("rank-body");
       if (!S.on) {
         el.innerHTML = `<div class="empty-note">${T.empty.rank}</div>`;
         return;
       }
-      try {
-        const rows = (await api("/api/leaderboard"))
-          .map(publicAgent)
-          .filter(r => S.me || r.kind === "agent");
-        rememberAgents(rows);
-        if (!rows.length) {
-          el.innerHTML = `<div class="empty-note">${T.empty.rankAwait}</div>`;
-          return;
-        }
-        const [playerTh, netTh, availableTh, inPlayTh, winTh] = T.rankTable;
-        const canOpen = r => r.kind === "agent" || (S.me && r.login === S.me.login);
-        const agentTags = r => (r.tags || []).slice(0, 2)
-          .map(t => `<span class="ai-badge style-tag">${esc(t)}</span>`).join("");
-        const whoHtml = r => `<span class="who-cell">${r.kind === "agent" ? agentIcon(r.model || r.login, 24) : (r.avatar_url ? `<img src="${r.avatar_url}">` : "")}<span class="who-name">${esc(r.name || r.login || "?")}</span>${r.kind === "agent" ? `<span class="who-tags"><span class="ai-badge">AI</span>${agentTags(r)}</span>` : ""}</span>`;
-        const rowAttrs = r => `data-login="${esc(r.login || "")}" data-kind="${r.kind}" data-name="${esc(r.name || r.login || "?")}"${canOpen(r) ? ' class="rk-click" title="查看预测记录"' : ""}`;
-        el.innerHTML = `<table class="rank-table">
-          <tr><th>#</th><th>${playerTh}</th><th>${netTh}</th><th>${availableTh}</th><th>${inPlayTh}</th><th>ROI</th><th>${winTh}</th></tr>` +
-          rows.map((r, i) => `<tr ${rowAttrs(r)}>
-            <td class="rk">${i + 1}</td>
-            <td>${whoHtml(r)}</td>
-            <td class="nw">${r.net_worth}</td><td>${r.balance}</td><td>${r.in_play}</td>
-            <td>${r.roi == null ? "—" : (r.roi * 100).toFixed(1) + "%"}</td>
-            <td>${r.wins}/${r.settled_n}</td></tr>`).join("") + "</table>" +
-          `<div class="rank-cards">` + rows.map((r, i) => `
-            <div class="rank-card${canOpen(r) ? " rk-click" : ""}" data-login="${esc(r.login || "")}" data-kind="${r.kind}" data-name="${esc(r.name || r.login || "?")}"${canOpen(r) ? ' title="查看预测记录"' : ""}>
-              <div class="rank-card-top">
-                <span class="rank-card-rk">#${i + 1}</span>
-                <div class="rank-card-main"><div class="rank-card-name">${whoHtml(r)}</div></div>
-                <span class="rank-card-value">${r.net_worth}</span>
-              </div>
-              <div class="rank-card-metrics">
-                <span>${EN ? "Record" : "战绩"} ${r.wins}/${r.settled_n}</span>
-                <span>ROI ${r.roi == null ? "—" : (r.roi * 100).toFixed(1) + "%"}</span>
-                <span>${availableTh} ${r.balance}</span>
-                <span>${inPlayTh} ${r.in_play}</span>
-              </div>
-            </div>`).join("") + `</div>`;
-        // AI 行人人可点；人类只有自己那一行可点（互相不可查）
-        el.querySelectorAll(".rk-click").forEach(tr =>
-          tr.addEventListener("click", async () => {
-            const login = tr.dataset.login;
-            if (S.me && login === S.me.login && tr.dataset.kind !== "agent") {
-              openMyHistory();
-              return;
-            }
-            openAgentHistory(login, tr.dataset.name);
-          }));
-      } catch (e) {
-        el.innerHTML = `<div class="empty-note">${T.empty.rankOpen}</div>`;
+      page = Math.max(0, page);
+      if (!force && S.rank.rows.length && page === S.rank.page) {
+        paintRank();
+        return;
       }
+      if (S.rank.loading) return;
+      S.rank.loading = true;
+      if (!S.rank.rows.length) {
+        el.innerHTML = `<div class="empty-note">${EN ? "Loading leaderboard..." : "正在读取排行榜…"}</div>`;
+      }
+      let failed = false;
+      try {
+        const res = await api(`/api/leaderboard?limit=${RANK_PAGE}&offset=${page * RANK_PAGE}&with_total=1`);
+        const rows = (Array.isArray(res) ? res : (res.items || []))
+          .map(publicAgent);
+        const total = Array.isArray(res) ? page * RANK_PAGE + rows.length : Number(res.total || 0);
+        const totalPages = Math.max(1, Math.ceil(total / RANK_PAGE));
+        if (page >= totalPages && page > 0) {
+          S.rank.loading = false;
+          return renderRank(totalPages - 1, true);
+        }
+        rememberAgents(rows);
+        S.rank.page = page;
+        S.rank.rows = rows;
+        S.rank.total = total;
+        S.rank.totalPages = totalPages;
+        S.rank.hasNext = page + 1 < totalPages;
+      } catch (e) {
+        failed = true;
+        S.rank.rows = [];
+        S.rank.total = 0;
+        S.rank.totalPages = 1;
+        S.rank.hasNext = false;
+        el.innerHTML = `<div class="empty-note">${T.empty.rankOpen}</div>`;
+      } finally {
+        S.rank.loading = false;
+      }
+      if (!failed) paintRank();
     }
 
     init();
-    return { enhanceDetail, decorateCards, confirmBet, showBetDetail, showBetHistory, renderAgentBets };
+    return { enhanceDetail, decorateCards, confirmBet, showBetDetail, showBetHistory, renderAgentBets, renderRank };
   })();
 
   /* ===== 保存长图 ===== */
