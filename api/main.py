@@ -494,6 +494,7 @@ def agents_info():
         "agents": agents,
         "system_bank": db.system_bank_public_summary(20),
         "daily_reward": db.daily_reward_context(),
+        "point_pool": db.point_pool_summary(),
     }
 
 

@@ -823,14 +823,18 @@ def _today() -> date:
     return date.today()
 
 
-def _contest_agent_clause(alias: str = "u") -> tuple[str, tuple]:
+def _advisor_login_exclusion_clause(alias: str = "u") -> tuple[str, tuple]:
     logins = tuple(sorted({_login_key(PUBLIC_ADVISOR_LOGIN), *LEGACY_ADVISOR_LOGINS}))
     placeholders = ",".join("?" for _ in logins)
     return (
-        f"{alias}.kind='agent' AND lower(COALESCE({alias}.login,'')) "
-        f"NOT IN ({placeholders})",
+        f"lower(COALESCE({alias}.login,'')) NOT IN ({placeholders})",
         tuple(_login_key(x) for x in logins),
     )
+
+
+def _contest_agent_clause(alias: str = "u") -> tuple[str, tuple]:
+    exclusion, params = _advisor_login_exclusion_clause(alias)
+    return f"{alias}.kind='agent' AND {exclusion}", params
 
 
 def _public_agent_row(row: dict) -> dict:
@@ -2048,9 +2052,17 @@ def leaderboard(limit: int = 100, offset: int = 0,
     offset = max(0, int(offset or 0))
     where = ""
     params: list = []
-    if kind in {"agent", "human"}:
+    if kind == "agent":
+        clause, clause_params = _contest_agent_clause("u")
+        where = f"WHERE {clause}"
+        params.extend(clause_params)
+    elif kind == "human":
         where = "WHERE u.kind=?"
         params.append(kind)
+    elif kind is None:
+        exclusion, clause_params = _advisor_login_exclusion_clause("u")
+        where = f"WHERE (u.kind!='agent' OR {exclusion})"
+        params.extend(clause_params)
     conn = connect()
     rows = conn.execute(f"""
         SELECT u.id, u.kind, u.login, u.name, u.avatar_url, u.model, u.persona,
@@ -2148,13 +2160,72 @@ def leaderboard(limit: int = 100, offset: int = 0,
 
 def leaderboard_count(kind: str | None = None) -> int:
     conn = connect()
-    if kind in {"agent", "human"}:
+    if kind == "agent":
+        clause, params = _contest_agent_clause("users")
+        row = conn.execute(f"SELECT COUNT(*) AS n FROM users WHERE {clause}",
+                           params).fetchone()
+    elif kind == "human":
         row = conn.execute("SELECT COUNT(*) AS n FROM users WHERE kind=?",
                            (kind,)).fetchone()
     else:
-        row = conn.execute("SELECT COUNT(*) AS n FROM users").fetchone()
+        exclusion, params = _advisor_login_exclusion_clause("users")
+        row = conn.execute(
+            f"SELECT COUNT(*) AS n FROM users "
+            f"WHERE (kind!='agent' OR {exclusion})",
+            params).fetchone()
     conn.close()
     return int(row["n"] if row else 0)
+
+
+def point_pool_summary() -> dict:
+    """全站积分池：初始积分与当前净资产合计的中性统计口径。"""
+    conn = connect()
+    exclusion, params = _advisor_login_exclusion_clause("u")
+    row = conn.execute("""
+        SELECT COUNT(u.id) AS participants,
+               COALESCE(SUM(u.balance
+                 + COALESCE(ba.in_play, 0) + COALESCE(sa.in_play, 0)
+                 - COALESCE(debt.debt, 0) + COALESCE(rec.receivable, 0)
+                 - COALESCE(sys.debt, 0)), 0) AS current_points
+        FROM users u
+        LEFT JOIN (
+          SELECT user_id, COALESCE(SUM(CASE WHEN settled=0 THEN stake END), 0) AS in_play
+          FROM bets GROUP BY user_id
+        ) ba ON ba.user_id = u.id
+        LEFT JOIN (
+          SELECT user_id, COALESCE(SUM(CASE WHEN settled=0 THEN stake END), 0) AS in_play
+          FROM score_bets GROUP BY user_id
+        ) sa ON sa.user_id = u.id
+        LEFT JOIN (
+          SELECT borrower_id, SUM(principal_remaining) AS debt
+          FROM agent_investments
+          WHERE status='active'
+          GROUP BY borrower_id
+        ) debt ON debt.borrower_id = u.id
+        LEFT JOIN (
+          SELECT lender_id, SUM(principal_remaining) AS receivable
+          FROM agent_investments
+          WHERE status='active'
+          GROUP BY lender_id
+        ) rec ON rec.lender_id = u.id
+        LEFT JOIN (
+          SELECT user_id, debt
+          FROM system_loans
+        ) sys ON sys.user_id = u.id
+        WHERE (u.kind!='agent' OR {exclusion})
+    """.format(exclusion=exclusion), params).fetchone()
+    conn.close()
+    participants = int(row["participants"] or 0) if row else 0
+    initial_points = participants * INIT_BALANCE
+    current_points = int(round(row["current_points"] or 0)) if row else 0
+    coefficient = (round(initial_points / current_points, 2)
+                   if current_points > 0 else None)
+    return {
+        "participants": participants,
+        "initial_points": initial_points,
+        "current_points": current_points,
+        "coefficient": coefficient,
+    }
 
 
 def match_bets(match_no: int, agents_only: bool = False) -> list[dict]:

@@ -511,9 +511,16 @@
     text-decoration: none; }
   .intel-source:hover { color: var(--lime); }
   .md-blurb { font-size: 13px; color: var(--dim); line-height: 1.9;
+    white-space: pre-line; overflow-wrap: anywhere;
     border-left: 2px solid rgba(255, 215, 94, .5); padding: 2px 0 2px 12px; margin-bottom: 14px; }
   .md-blurb b { font-family: var(--mono); font-size: 11px; color: var(--gold);
-    letter-spacing: .12em; margin-right: 6px; font-weight: 600; }
+    letter-spacing: .12em; margin: 0 0 6px; font-weight: 600; display: block; }
+  .md-blurb-tabs { display: flex; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
+  .md-blurb-tab { font-family: var(--mono); font-size: 11px; color: var(--dim);
+    border: 1px solid var(--line-strong); border-radius: 3px;
+    background: rgba(214,255,222,.035); padding: 4px 9px; cursor: pointer; }
+  .md-blurb-tab.active { color: var(--bg); background: var(--lime); border-color: var(--lime); }
+  .md-blurb-panel[hidden] { display: none; }
   .md-action-row { display: flex; align-items: center; justify-content: flex-end; margin-bottom: 12px; }
   .match-share-btn { display: inline-flex; align-items: center; gap: 7px;
     font-family: var(--mono); font-size: 11px; color: var(--lime);
@@ -758,7 +765,6 @@
   .qr-pop p { margin: 9px 0 0; font-family: var(--mono); font-size: 11px;
     line-height: 1.75; color: var(--dim); }
   .qr-pop p span { display: block; }
-  .qr-pop .qr-note { color: var(--lime); }
 
   @keyframes blink { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
 
@@ -931,14 +937,20 @@
 
   .m-betline { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
     gap: 8px; margin-bottom: 9px; }
-  .card-bets { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-width: 0; }
+  .card-bets { display: flex; align-items: center; flex-wrap: nowrap; gap: 4px;
+    min-width: 0; min-height: 23px; overflow: visible; }
   .card-bets.cb-H { justify-content: flex-start; }
   .card-bets.cb-D { justify-content: center; }
   .card-bets.cb-A { justify-content: flex-end; }
   .card-bets .cb-svg { width: 17px; height: 17px; border-radius: 50%;
     border: 1.5px solid var(--draw); background: var(--panel);
     display: inline-flex; align-items: center; justify-content: center;
-    padding: 2px; font-size: 10px; position: relative; }
+    padding: 2px; font-size: 10px; position: relative; flex: 0 0 auto; }
+  .card-bets.is-stacked { gap: 0; }
+  .card-bets.is-stacked .cb-svg { margin-left: -6px;
+    box-shadow: 0 0 0 1.5px rgba(7,16,11,.9), 0 2px 8px rgba(0,0,0,.2); }
+  .card-bets.is-stacked .cb-svg:first-child { margin-left: 0; }
+  .card-bets.cb-A.is-stacked .cb-svg { margin-left: -6px; }
   .card-bets .cb-svg svg { width: 100%; height: 100%; }
   .advisor-tag { font-family: var(--mono); font-size: 10px; color: #fff6d6;
     border: 1px solid rgba(255,104,82,.62); border-radius: 2px;
@@ -972,7 +984,7 @@
   .ag-icon svg { width: 100%; height: 100%; }
   .arena-chart { border: 1px solid var(--line); border-radius: 4px;
     background: rgba(12,24,17,.45); padding: 18px; margin-bottom: 26px; }
-  .arena-finance { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+  .arena-finance { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
     gap: 8px; margin: 0 0 12px; }
   .finance-kpi { border: 1px solid var(--line); border-radius: 4px;
     background: rgba(12,24,17,.45); padding: 11px 12px; min-width: 0; }
@@ -980,6 +992,9 @@
     color: var(--faint); text-transform: uppercase; letter-spacing: .06em; }
   .finance-kpi b { display: block; margin-top: 5px; color: var(--ink);
     font-family: var(--mono); font-size: 14px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .finance-kpi small { display: block; margin-top: 3px; color: var(--faint);
+    font-family: var(--mono); font-size: 10.5px; overflow: hidden;
     text-overflow: ellipsis; white-space: nowrap; }
   .finance-kpi.hot b { color: var(--hot); }
   .finance-kpi.gold b { color: var(--gold); }
@@ -1062,7 +1077,9 @@
   .card-bets .pickD { border-color: var(--draw); }
   .card-bets .pickA { border-color: var(--hot); }
   .card-bets .pickS { border-color: var(--gold); }
-  .card-bets .cb-more { font-family: var(--mono); font-size: 10px; color: var(--faint); }
+  .card-bets .cb-more { flex: 0 0 auto; margin-left: 5px; font-family: var(--mono);
+    font-size: 10px; color: var(--faint); border: 1px solid var(--line);
+    border-radius: 999px; padding: 1px 6px; background: rgba(7,18,12,.72); }
 
   .rank-table { width: 100%; border-collapse: collapse; }
   .rank-table th { font-family: var(--mono); font-size: 11px; color: var(--faint);
@@ -1380,7 +1397,7 @@
     </button>
     <div class="qr-pop" id="qr-pop" hidden>
       <img src="contact-qr.svg" alt="讨论群二维码">
-      <p><span>扫码加入 AI · 世界杯讨论</span><span class="qr-note">备注：看球</span></p>
+      <p><span>扫码加入 AI · 世界杯讨论</span></p>
     </div>
     <a class="gh-link" href="https://github.com/vastxie/ai-worldcup-2026" target="_blank" rel="noopener">
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
@@ -2116,6 +2133,37 @@
     return d >= start && d < end;
   }
 
+  function blurbSections(raw) {
+    const text = String(raw || "").trim();
+    if (!text) return [];
+    const markers = [...text.matchAll(/(?:^|\n)(赛前分析|赛后复盘)\s*\n/g)];
+    if (!markers.length) return [{ key: "pre", label: "赛前分析", body: text }];
+    return markers.map((m, i) => {
+      const next = markers[i + 1];
+      const label = m[1];
+      return {
+        key: label === "赛后复盘" ? "post" : "pre",
+        label,
+        body: text.slice(m.index + m[0].length, next ? next.index : text.length).trim()
+      };
+    }).filter(s => s.body);
+  }
+
+  function blurbPreview(raw) {
+    const sections = blurbSections(raw);
+    const preferred = sections.find(s => s.key === "pre") || sections[0];
+    return preferred ? preferred.body.replace(/\s+/g, " ").trim() : "";
+  }
+
+  function renderBlurbTabs(matchNo, raw) {
+    const sections = blurbSections(raw);
+    if (!sections.length) return "";
+    const active = sections[0].key;
+    const tabs = sections.map(s => `<button class="md-blurb-tab${s.key === active ? " active" : ""}" type="button" data-match="${matchNo}" data-blurb-tab="${esc(s.key)}">${esc(s.label)}</button>`).join("");
+    const panels = sections.map(s => `<div class="md-blurb-panel" data-match="${matchNo}" data-blurb-panel="${esc(s.key)}"${s.key === active ? "" : " hidden"}>${esc(s.body)}</div>`).join("");
+    return `<div class="md-blurb"><div class="md-blurb-tabs">${tabs}</div>${panels}</div>`;
+  }
+
   /* ===== 比赛详情面板 ===== */
   function buildDetail(m) {
     const p = m.pred, hn = zh(m.home), an = zh(m.away);
@@ -2144,7 +2192,7 @@
         </svg>
         分享预测
       </button>
-    </div>${blurb ? `<div class="md-blurb"><b>AI 怎么看</b>${esc(blurb)}</div>` : ""}<div class="md-title">最可能比分 TOP 5</div>`;
+    </div>${renderBlurbTabs(m.match, blurb)}<div class="md-title">最可能比分 TOP 5</div>`;
     const maxT = p.top_scores[0].p;
     p.top_scores.forEach((t, i) => {
       right += `<div class="ts-row${i === 0 ? " hl" : ""}"><span>${t.score.join(" - ")}</span>
@@ -2357,6 +2405,18 @@
   }
   attachDetailToggle("schedule-list");
   attachDetailToggle("record-list");
+  document.addEventListener("click", e => {
+    const btn = e.target.closest(".md-blurb-tab");
+    if (!btn) return;
+    const box = btn.closest(".md-blurb");
+    if (!box) return;
+    const key = btn.dataset.blurbTab;
+    box.querySelectorAll(".md-blurb-tab").forEach(b =>
+      b.classList.toggle("active", b === btn));
+    box.querySelectorAll(".md-blurb-panel").forEach(panel => {
+      panel.hidden = panel.dataset.blurbPanel !== key;
+    });
+  });
 
   function renderSchedule() {
     const el = document.getElementById("schedule-list");
@@ -2824,7 +2884,7 @@
     }
 
     function matchTakeaway(m) {
-      const blurb = String((window.WC_BLURBS || {})[m.match] || "").trim();
+      const blurb = blurbPreview((window.WC_BLURBS || {})[m.match]);
       if (blurb) return blurb.length > 78 ? blurb.slice(0, 78) + "..." : blurb;
       const p = m.pred || {};
       const scores = likelyScoresLabel(p);
@@ -3116,12 +3176,16 @@
     function arenaFinanceHtml(arena) {
       const reward = arena && arena.daily_reward || {};
       const bank = arena && arena.system_bank || [];
+      const pool = arena && arena.point_pool || {};
       const today = reward["今日暂列"] || [];
       const recent = reward["最近奖励"] || [];
       const leader = today[0];
       const lastAward = recent.find(x => x && x["状态"] === "awarded");
       const debtTotal = bank.reduce((sum, x) => sum + Number(x["系统债务"] || 0), 0);
       const debtCount = bank.filter(x => Number(x["系统债务"] || 0) > 0).length;
+      const fmtPoints = n => Number.isFinite(Number(n))
+        ? Math.round(Number(n)).toLocaleString(EN ? "en-US" : "zh-CN")
+        : "—";
       const leaderText = leader
         ? `${leader["名字"] || leader["登录"]} ${leader["当日净收益"] > 0 ? "+" : ""}${leader["当日净收益"]}`
         : (EN ? "No settled gain yet" : "今日暂无结算收益");
@@ -3131,10 +3195,16 @@
       const debtText = debtTotal
         ? `${debtTotal} / ${debtCount}${EN ? " agents" : " 位 AI"}`
         : (EN ? "No bank debt" : "暂无系统债务");
+      const poolRatio = Number(pool.coefficient);
+      const poolText = Number.isFinite(poolRatio) ? `${poolRatio.toFixed(2)}x` : "—";
+      const poolDetail = pool.initial_points || pool.current_points
+        ? `${EN ? "Initial" : "初始"} ${fmtPoints(pool.initial_points)} / ${EN ? "Current" : "当前"} ${fmtPoints(pool.current_points)}`
+        : (EN ? "Waiting for point data" : "等待积分数据");
       return `<div class="arena-finance">
         <div class="finance-kpi gold"><span>${EN ? "Daily +100 race" : "每日 +100 暂列"}</span><b>${esc(leaderText)}</b></div>
         <div class="finance-kpi"><span>${EN ? "Last daily reward" : "上一笔每日奖励"}</span><b>${esc(awardText)}</b></div>
         <div class="finance-kpi hot"><span>${EN ? "System bank debt" : "系统银行债务"}</span><b>${esc(debtText)}</b></div>
+        <div class="finance-kpi"><span>${EN ? "Point pool coefficient" : "积分池系数"}</span><b>${esc(poolText)}</b><small>${esc(poolDetail)}</small></div>
       </div>`;
     }
 
@@ -3528,6 +3598,30 @@
       return `<span class="cb-svg ${cls}" data-agent="${esc(b.login || "")}" data-name="${esc(view.name || view.login || "?")}">${inner}${card}</span>`;
     }
 
+    const CARD_BET_STACK_THRESHOLD = 8;
+    const CARD_BET_STACK_VISIBLE = 14;
+    function cardBetAvatarsHtml(bets, pickNames) {
+      const arr = bets || [];
+      const stacked = arr.length > CARD_BET_STACK_THRESHOLD;
+      const visible = stacked ? arr.slice(0, CARD_BET_STACK_VISIBLE) : arr;
+      const more = Math.max(0, arr.length - visible.length);
+      const hiddenNames = more
+        ? arr.slice(visible.length, visible.length + 12)
+            .map(b => {
+              const view = b.kind === "agent" ? publicAgent(b) : b;
+              return view.name || view.login || "?";
+            }).join("、")
+        : "";
+      const moreTitle = more
+        ? `还有 ${more} 个 AI${hiddenNames ? "：" + hiddenNames + (more > 12 ? "…" : "") : ""}`
+        : "";
+      return {
+        stacked,
+        html: visible.map(b => avatarHtml(b, pickNames)).join("")
+          + (more ? `<span class="cb-more" title="${esc(moreTitle)}">+${more}</span>` : "")
+      };
+    }
+
     function decorateCards() {
       if (!S.on) return;
       document.querySelectorAll("#schedule-list .mcard").forEach(card => {
@@ -3536,8 +3630,8 @@
         const cbA = card.querySelector(".cb-A");
         const verdictEl = card.querySelector(".m-verdict");
         // 重入清理：头像贴在 verdict 行——主胜左、客胜右、平局作中间前缀
-        if (cbH) cbH.innerHTML = "";
-        if (cbA) cbA.innerHTML = "";
+        if (cbH) { cbH.innerHTML = ""; cbH.classList.remove("is-stacked"); }
+        if (cbA) { cbA.innerHTML = ""; cbA.classList.remove("is-stacked"); }
         card.querySelectorAll(".m-verdict .cb-D").forEach(o => o.remove());
         // 卡片角标只展示 AI 选手的预测；人类预测不上墙
         const bs = (S.byMatch[no] || []).filter(b => b.kind === "agent");
@@ -3547,12 +3641,19 @@
                             A: "看好 " + zh(md.away) + " 胜" };
         const grp = { H: [], D: [], A: [] };
         bs.forEach(b => (grp[betOutcomeKey(b)] || grp.D).push(b));
-        const avs = arr => arr.map(b => avatarHtml(b, pickNames)).join("");
-        if (cbH) cbH.innerHTML = avs(grp.H);
-        if (cbA) cbA.innerHTML = avs(grp.A);
-        if (verdictEl && grp.D.length)
+        const applyAvatars = (el, arr) => {
+          if (!el) return;
+          const out = cardBetAvatarsHtml(arr, pickNames);
+          el.classList.toggle("is-stacked", out.stacked);
+          el.innerHTML = out.html;
+        };
+        applyAvatars(cbH, grp.H);
+        applyAvatars(cbA, grp.A);
+        if (verdictEl && grp.D.length) {
+          const out = cardBetAvatarsHtml(grp.D, pickNames);
           verdictEl.insertAdjacentHTML("afterbegin",
-            `<span class="card-bets cb-D">${avs(grp.D)}</span>`);
+            `<span class="card-bets cb-D${out.stacked ? " is-stacked" : ""}">${out.html}</span>`);
+        }
         card.querySelectorAll(".cb-svg[data-agent]").forEach(el => {
           el.addEventListener("click", e => e.stopPropagation());
           const cardEl = el.querySelector(".cb-card");
