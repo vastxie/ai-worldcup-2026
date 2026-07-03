@@ -486,8 +486,7 @@ async def like_post(post_id: int, request: Request):
 @app.get("/api/agents")
 def agents_info():
     """AI 选手专区：选手卡 + 积分曲线。讨论流走 /api/posts。"""
-    rows = db.leaderboard(100)
-    agents = [r for r in rows if r["kind"] == "agent"]
+    agents = db.leaderboard(100, kind="agent")
     for a in agents:
         a["timeline"] = db.balance_timeline(a["id"])
     return {
