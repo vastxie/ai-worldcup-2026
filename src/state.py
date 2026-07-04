@@ -413,62 +413,66 @@ def build_state(write_side_effects: bool = True) -> dict:
         pred = match_probabilities(home, away, knockout=ko, we_override=pred_o)
         top_score = pred["outcome_score"][0]  # 与胜负判断一致的首选比分
 
-        actual = outcome_of(m["score"])
-        probs = {"H": pred["p_win"], "D": pred["p_draw"], "A": pred["p_loss"]}
-        predicted = max(probs, key=probs.get)
-        outcome_hit = predicted == actual
-        score_hit = list(top_score) == list(m["score"])
-        top3_score_hit = list(m["score"]) in [
-            list(s) for s, _ in pred["top_scores"][:3]
-        ]
-        n_outcome_hit += outcome_hit
-        n_score_hit += score_hit
-        n_top3_score_hit += top3_score_hit
-        brier_sum += sum((probs[o] - (1.0 if o == actual else 0.0)) ** 2
-                         for o in "HDA")
+        actual_score = m.get("settle_score")
+        if actual_score:
+            actual = outcome_of(actual_score)
+            probs = {"H": pred["p_win"], "D": pred["p_draw"], "A": pred["p_loss"]}
+            predicted = max(probs, key=probs.get)
+            outcome_hit = predicted == actual
+            score_hit = list(top_score) == list(actual_score)
+            top3_score_hit = list(actual_score) in [
+                list(s) for s, _ in pred["top_scores"][:3]
+            ]
+            n_outcome_hit += outcome_hit
+            n_score_hit += score_hit
+            n_top3_score_hit += top3_score_hit
+            brier_sum += sum((probs[o] - (1.0 if o == actual else 0.0)) ** 2
+                             for o in "HDA")
 
-        # 主观微调过的场次：再按反事实基线计一遍误差，量化判断增益
-        fable = lk.get("fable") if lk else None
-        base = None
-        if fable and lk.get("we_base") is not None:
-            n_adjusted += 1
-            base_o = lock_prediction_override(lk, base=True)
-            pred_b = match_probabilities(home, away, knockout=ko,
-                                         we_override=base_o)
-            probs_b = {"H": pred_b["p_win"], "D": pred_b["p_draw"],
-                       "A": pred_b["p_loss"]}
-            base = {k: round(v, 4) for k, v in
-                    zip(("p_home", "p_draw", "p_away"),
-                        (probs_b["H"], probs_b["D"], probs_b["A"]))}
-        else:
-            probs_b = probs
-        brier_base_sum += sum((probs_b[o] - (1.0 if o == actual else 0.0)) ** 2
-                              for o in "HDA")
+            # 主观微调过的场次：再按反事实基线计一遍误差，量化判断增益
+            fable = lk.get("fable") if lk else None
+            base = None
+            if fable and lk.get("we_base") is not None:
+                n_adjusted += 1
+                base_o = lock_prediction_override(lk, base=True)
+                pred_b = match_probabilities(home, away, knockout=ko,
+                                             we_override=base_o)
+                probs_b = {"H": pred_b["p_win"], "D": pred_b["p_draw"],
+                           "A": pred_b["p_loss"]}
+                base = {k: round(v, 4) for k, v in
+                        zip(("p_home", "p_draw", "p_away"),
+                            (probs_b["H"], probs_b["D"], probs_b["A"]))}
+            else:
+                probs_b = probs
+            brier_base_sum += sum((probs_b[o] - (1.0 if o == actual else 0.0)) ** 2
+                                  for o in "HDA")
 
-        records.append({
-            "match": m["match"], "stage": m["stage"], "date_utc": m["date_utc"],
-            "home": m["home"], "away": m["away"], "score": m["score"],
-            "winner": m["winner"],
-            "p_home": round(pred["p_win"], 4),
-            "p_draw": round(pred["p_draw"], 4),
-            "p_away": round(pred["p_loss"], 4),
-            "pick": pred["outcome_pick"],
-            "pred_score": list(top_score),
-            "top_scores": [{"score": list(s), "p": round(p, 4)}
-                           for s, p in pred["top_scores"][:5]],
-            "grid": score_grid(home, away, we_override=pred_o),
-            "p_actual_score": round(
-                exact_score_prob(home, away, *m["score"],
-                                 we_override=pred_o), 4),
-            "market": lk.get("market") if lk else None,
-            "elo_home_before": round(home["elo"], 1),
-            "elo_away_before": round(away["elo"], 1),
-            "outcome_hit": outcome_hit,
-            "score_hit": score_hit,
-            "top3_score_hit": top3_score_hit,
-            "fable": fable,
-            "base": base,
-        })
+            records.append({
+                "match": m["match"], "stage": m["stage"], "date_utc": m["date_utc"],
+                "home": m["home"], "away": m["away"], "score": m["score"],
+                "settle_score": actual_score,
+                "score_type": m.get("score_type") or "regular",
+                "winner": m["winner"],
+                "p_home": round(pred["p_win"], 4),
+                "p_draw": round(pred["p_draw"], 4),
+                "p_away": round(pred["p_loss"], 4),
+                "pick": pred["outcome_pick"],
+                "pred_score": list(top_score),
+                "top_scores": [{"score": list(s), "p": round(p, 4)}
+                               for s, p in pred["top_scores"][:5]],
+                "grid": score_grid(home, away, we_override=pred_o),
+                "p_actual_score": round(
+                    exact_score_prob(home, away, *actual_score,
+                                     we_override=pred_o), 4),
+                "market": lk.get("market") if lk else None,
+                "elo_home_before": round(home["elo"], 1),
+                "elo_away_before": round(away["elo"], 1),
+                "outcome_hit": outcome_hit,
+                "score_hit": score_hit,
+                "top3_score_hit": top3_score_hit,
+                "fable": fable,
+                "base": base,
+            })
 
         elo_h_before, elo_a_before = home["elo"], away["elo"]
         home["elo"], away["elo"] = update_elo(

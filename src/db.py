@@ -60,6 +60,9 @@ CREATE TABLE IF NOT EXISTS matches (
   slot_away  TEXT,
   score_home INTEGER,
   score_away INTEGER,
+  settle_score_home INTEGER,          -- 投注/预测战绩结算比分；淘汰赛加时/点球时通常为90分钟比分
+  settle_score_away INTEGER,
+  score_type TEXT DEFAULT 'regular',  -- regular / final_aet / penalties
   winner     TEXT,
   source     TEXT DEFAULT 'feed'      -- feed / espn / manual
 );
@@ -444,6 +447,17 @@ def init_db(conn: sqlite3.Connection | None = None) -> None:
     except sqlite3.OperationalError:
         pass
     for col in (
+        "settle_score_home INTEGER", "settle_score_away INTEGER",
+        "score_type TEXT DEFAULT 'regular'",
+    ):
+        try:  # 增量迁移：最终比分与投注结算比分分离
+            conn.execute(f"ALTER TABLE matches ADD COLUMN {col}")
+        except sqlite3.OperationalError:
+            pass
+    conn.execute("""UPDATE matches
+                    SET score_type='regular'
+                    WHERE score_type IS NULL OR score_type=''""")
+    for col in (
         "we_base REAL", "fable_delta REAL", "fable_note TEXT",
         "pred_home REAL", "pred_draw REAL", "pred_away REAL",
         "base_home REAL", "base_draw REAL", "base_away REAL",
@@ -513,12 +527,23 @@ def match_row_to_dict(r: sqlite3.Row) -> dict:
     score = ([r["score_home"], r["score_away"]]
              if r["score_home"] is not None and r["score_away"] is not None
              else None)
+    score_type = r["score_type"] if "score_type" in r.keys() else "regular"
+    if ("settle_score_home" in r.keys()
+            and r["settle_score_home"] is not None
+            and r["settle_score_away"] is not None):
+        settle_score = [r["settle_score_home"], r["settle_score_away"]]
+    elif str(score_type or "regular").lower() in {"final_aet", "penalties"}:
+        settle_score = None
+    else:
+        settle_score = score
     return {
         "match": r["match_no"], "round": r["round"], "stage": r["stage"],
         "group": r["grp"], "date_utc": r["date_utc"], "venue": r["venue"],
         "home": r["home"], "away": r["away"],
         "slot_home": r["slot_home"], "slot_away": r["slot_away"],
-        "score": score, "winner": r["winner"], "source": r["source"],
+        "score": score, "settle_score": settle_score,
+        "score_type": score_type,
+        "winner": r["winner"], "source": r["source"],
     }
 
 
@@ -536,6 +561,9 @@ def upsert_matches(matches: list[dict], source: str = "feed") -> None:
     with transaction() as conn:
         for m in matches:
             score = m.get("score") or [None, None]
+            settle_score = m.get("settle_score") or [None, None]
+            score_type = m.get("score_type") or (
+                "regular" if score[0] is not None and score[1] is not None else None)
             incoming_has_score = score[0] is not None and score[1] is not None
             existing = conn.execute(
                 "SELECT source, score_home, score_away FROM matches WHERE match_no=?",
@@ -556,8 +584,9 @@ def upsert_matches(matches: list[dict], source: str = "feed") -> None:
             conn.execute("""
                 INSERT INTO matches (match_no, round, stage, grp, date_utc,
                     venue, home, away, slot_home, slot_away,
-                    score_home, score_away, winner, source)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    score_home, score_away, settle_score_home,
+                    settle_score_away, score_type, winner, source)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(match_no) DO UPDATE SET
                   round=excluded.round, stage=excluded.stage, grp=excluded.grp,
                   date_utc=excluded.date_utc, venue=excluded.venue,
@@ -566,22 +595,36 @@ def upsert_matches(matches: list[dict], source: str = "feed") -> None:
                   slot_home=excluded.slot_home, slot_away=excluded.slot_away,
                   score_home=CASE WHEN ? THEN score_home ELSE excluded.score_home END,
                   score_away=CASE WHEN ? THEN score_away ELSE excluded.score_away END,
+                  settle_score_home=CASE WHEN ? THEN settle_score_home ELSE excluded.settle_score_home END,
+                  settle_score_away=CASE WHEN ? THEN settle_score_away ELSE excluded.settle_score_away END,
+                  score_type=CASE WHEN ? THEN score_type ELSE excluded.score_type END,
                   winner=CASE WHEN ? THEN winner ELSE excluded.winner END,
                   source=CASE WHEN ? THEN source ELSE excluded.source END
             """, (m["match"], m.get("round"), m.get("stage"), m.get("group"),
                   m.get("date_utc"), m.get("venue"), m.get("home"),
                   m.get("away"), m.get("slot_home"), m.get("slot_away"),
-                  score[0], score[1], m.get("winner"), source,
+                  score[0], score[1], settle_score[0], settle_score[1],
+                  score_type, m.get("winner"), source,
                   keep_existing_score, keep_existing_score,
+                  keep_existing_score, keep_existing_score,
+                  keep_existing_score,
                   keep_existing_score, keep_existing_score))
 
 
 def record_manual_score(match_no: int, gh: int, ga: int,
-                        winner: str | None = None) -> None:
+                        winner: str | None = None,
+                        settle_score: tuple[int, int] | None = None,
+                        score_type: str = "regular") -> None:
+    settle_home = settle_score[0] if settle_score else None
+    settle_away = settle_score[1] if settle_score else None
     with transaction() as conn:
         conn.execute("""UPDATE matches SET score_home=?, score_away=?,
-                        winner=COALESCE(?, winner), source='manual'
-                        WHERE match_no=?""", (gh, ga, winner, match_no))
+                        settle_score_home=?, settle_score_away=?,
+                        score_type=?, winner=COALESCE(?, winner),
+                        source='manual'
+                        WHERE match_no=?""",
+                     (gh, ga, settle_home, settle_away, score_type,
+                      winner, match_no))
 
 
 # ------------------------------------------------------------------ locks --
@@ -1951,18 +1994,35 @@ def place_score_bet(user_id: int, match_no: int, home_score: int,
                                  (bet_id,)).fetchone())
 
 
+def _settlement_score(row) -> tuple[int, int] | None:
+    if (row["settle_score_home"] is not None
+            and row["settle_score_away"] is not None):
+        return int(row["settle_score_home"]), int(row["settle_score_away"])
+    # ESPN 的 AET/点球终场比分不是投注结算比分；没有单独结算比分时先不结。
+    if str(row["score_type"] or "regular").lower() in {"final_aet", "penalties"}:
+        return None
+    if row["score_home"] is not None and row["score_away"] is not None:
+        return int(row["score_home"]), int(row["score_away"])
+    return None
+
+
 def settle_finished_bets() -> int:
     """幂等结算所有已完赛比赛的未结预测。返回结算笔数。"""
     settled = 0
     with transaction() as conn:
         rows = conn.execute("""
-            SELECT b.*, m.score_home, m.score_away FROM bets b
+            SELECT b.*, m.score_home, m.score_away,
+                   m.settle_score_home, m.settle_score_away, m.score_type
+            FROM bets b
             JOIN matches m ON m.match_no = b.match_no
             WHERE b.settled = 0 AND m.score_home IS NOT NULL
         """).fetchall()
         for b in rows:
-            outcome = ("H" if b["score_home"] > b["score_away"]
-                       else "A" if b["score_away"] > b["score_home"] else "D")
+            score = _settlement_score(b)
+            if score is None:
+                continue
+            gh, ga = score
+            outcome = ("H" if gh > ga else "A" if ga > gh else "D")
             payout = round(b["stake"] * b["odds"]) if b["pick"] == outcome else 0
             cur = conn.execute("""UPDATE bets SET settled=1, payout=?, settled_at=?
                                   WHERE id=? AND settled=0""",
@@ -1980,14 +2040,18 @@ def settle_finished_bets() -> int:
                     conn, b["user_id"], b["id"], b["stake"], payout)
             settled += 1
         rows = conn.execute("""
-            SELECT b.*, m.score_home AS actual_home, m.score_away AS actual_away
+            SELECT b.*, m.score_home, m.score_away,
+                   m.settle_score_home, m.settle_score_away, m.score_type
             FROM score_bets b
             JOIN matches m ON m.match_no = b.match_no
             WHERE b.settled = 0 AND m.score_home IS NOT NULL
         """).fetchall()
         for b in rows:
-            hit = (int(b["home_score"]) == int(b["actual_home"])
-                   and int(b["away_score"]) == int(b["actual_away"]))
+            score = _settlement_score(b)
+            if score is None:
+                continue
+            gh, ga = score
+            hit = (int(b["home_score"]) == gh and int(b["away_score"]) == ga)
             payout = round(b["stake"] * b["odds"]) if hit else 0
             cur = conn.execute("""UPDATE score_bets
                                   SET settled=1, payout=?, settled_at=?
@@ -3114,7 +3178,9 @@ def _agent_outcome_review_rows(conn: sqlite3.Connection,
                b.stake, b.odds, COALESCE(b.payout, 0) AS payout,
                b.placed_at, b.settled_at, b.reason,
                u.login, u.name, u.model, u.persona,
-               m.stage, m.round, m.home, m.away, m.score_home, m.score_away
+               m.stage, m.round, m.home, m.away,
+               COALESCE(m.settle_score_home, m.score_home) AS score_home,
+               COALESCE(m.settle_score_away, m.score_away) AS score_away
         FROM bets b
         JOIN users u ON u.id=b.user_id
         JOIN matches m ON m.match_no=b.match_no
@@ -3136,7 +3202,9 @@ def _agent_score_review_rows(conn: sqlite3.Connection,
                b.stake, b.odds, COALESCE(b.payout, 0) AS payout,
                b.placed_at, b.settled_at, b.reason,
                u.login, u.name, u.model, u.persona,
-               m.stage, m.round, m.home, m.away, m.score_home, m.score_away
+               m.stage, m.round, m.home, m.away,
+               COALESCE(m.settle_score_home, m.score_home) AS score_home,
+               COALESCE(m.settle_score_away, m.score_away) AS score_away
         FROM score_bets b
         JOIN users u ON u.id=b.user_id
         JOIN matches m ON m.match_no=b.match_no
@@ -3436,6 +3504,7 @@ def user_bets(user_id: int) -> list[dict]:
                  b.stake, b.odds, b.placed_at, b.settled, b.payout,
                  b.settled_at, b.reason,
                  m.home, m.away, m.date_utc, m.score_home, m.score_away,
+                 m.settle_score_home, m.settle_score_away, m.score_type,
                  u.kind, u.login, u.name, u.avatar_url, u.model, u.persona
           FROM bets b
           JOIN matches m ON m.match_no = b.match_no
@@ -3448,6 +3517,7 @@ def user_bets(user_id: int) -> list[dict]:
                  b.stake, b.odds, b.placed_at, b.settled, b.payout,
                  b.settled_at, b.reason,
                  m.home, m.away, m.date_utc, m.score_home, m.score_away,
+                 m.settle_score_home, m.settle_score_away, m.score_type,
                  u.kind, u.login, u.name, u.avatar_url, u.model, u.persona
           FROM score_bets b
           JOIN matches m ON m.match_no = b.match_no

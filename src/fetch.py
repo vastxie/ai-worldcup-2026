@@ -138,8 +138,17 @@ def _espn_final(event: dict) -> dict | None:
     if not home_code or not away_code or gh is None or ga is None:
         return None
 
+    status_text = " ".join(str(status_type.get(k) or "")
+                           for k in ("name", "description", "detail", "shortDetail")).upper()
+    if "PEN" in status_text:
+        score_type = "penalties"
+    elif "AET" in status_text or "EXTRA TIME" in status_text:
+        score_type = "final_aet"
+    else:
+        score_type = "regular"
+
     winner = None
-    if gh == ga:
+    if score_type in {"final_aet", "penalties"} or gh == ga:
         for side in (home, away):
             if side.get("winner"):
                 winner = _espn_team_code(side)
@@ -148,6 +157,7 @@ def _espn_final(event: dict) -> dict | None:
         "home": home_code,
         "away": away_code,
         "score": [gh, ga],
+        "score_type": score_type,
         "winner": winner,
         "date_utc": comp.get("date") or event.get("date"),
     }
@@ -221,6 +231,7 @@ def sync_espn_scores(matches: list[dict] | None = None,
                 continue
             patched = dict(match)
             patched["score"] = final["score"]
+            patched["score_type"] = final["score_type"]
             patched["winner"] = final["winner"]
             patches.append(patched)
             seen.add(match["match"])

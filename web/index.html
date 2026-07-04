@@ -1527,6 +1527,31 @@
   const zh = c => byCode[c] ? (EN ? (byCode[c].name_en || byCode[c].name_zh) : byCode[c].name_zh) : c;
   const pct = (p, d = 1) => p == null ? "—" : ((p * 100 < 0.05 && p > 0) ? "<0.1%" : (p * 100).toFixed(d) + "%");
   const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  function differsScore(a, b) {
+    return a && b && (Number(a[0]) !== Number(b[0]) || Number(a[1]) !== Number(b[1]));
+  }
+  function finalScoreLabel(m) {
+    if (!m || !m.score) return "";
+    const final = `${m.score[0]}:${m.score[1]}`;
+    const settle = m.settle_score;
+    return differsScore(m.score, settle)
+      ? `${final} · ${EN ? "90m" : "常规"} ${settle[0]}:${settle[1]}`
+      : final;
+  }
+  function betScoreLabel(b) {
+    if (!b || b.score_home == null) return "";
+    const final = `${b.score_home}:${b.score_away}`;
+    const hasSettle = b.settle_score_home != null && b.settle_score_away != null;
+    return hasSettle && (Number(b.score_home) !== Number(b.settle_score_home)
+      || Number(b.score_away) !== Number(b.settle_score_away))
+      ? `${final} · ${EN ? "90m" : "常规"} ${b.settle_score_home}:${b.settle_score_away}`
+      : final;
+  }
+  function outcomeText(score, homeName, awayName) {
+    if (!score) return "";
+    const win = EN ? "win" : "胜";
+    return score[0] > score[1] ? `${homeName} ${win}` : score[0] < score[1] ? `${awayName} ${win}` : (EN ? "Draw" : "战平");
+  }
   const HTML2CANVAS_VERSION = "20260615-2";
   const HTML2CANVAS_SOURCES = [
     `/html2canvas.min.js?v=${HTML2CANVAS_VERSION}`,
@@ -1944,7 +1969,7 @@
         bot.d < -0.0005 && `<span class="tm-pill down">↓ ${FLAG[bot.code] || ""} ${esc(zh(bot.code))} 出线 ${fmtD(bot.d)}</span>`,
       ].filter(Boolean).join("") : "";
       const cards = recent.map(r => {
-        const sc = r.score ? `${r.score[0]} : ${r.score[1]}` : "";
+        const sc = finalScoreLabel(r).replace(":", " : ");
         return `<div class="mi-card">
           <div class="mi-head">${FLAG[r.home] || ""} ${esc(zh(r.home))} <b>${sc}</b> ${esc(zh(r.away))} ${FLAG[r.away] || ""}</div>
           ${sideRow(r.home)}${sideRow(r.away)}
@@ -2079,7 +2104,7 @@
     let mid, verdict = "";
     if (m.score) {
       const pens = m.score[0] === m.score[1] && m.winner ? `<span class="pens">点球 ${esc(zh(m.winner))} 晋级</span>` : "";
-      mid = `<span class="m-mid"><span class="sc">${m.score[0]}:${m.score[1]}</span>${pens}</span>`;
+      mid = `<span class="m-mid"><span class="sc">${esc(finalScoreLabel(m))}</span>${pens}</span>`;
       if (m.pred) {
         verdict = `<div class="m-verdict">
           <span class="hit ${m.outcome_hit ? "yes" : "no"}">${m.outcome_hit ? "✓ 胜负命中" : "✗ 胜负未中"}</span>
@@ -2170,9 +2195,13 @@
     let maxv = 0;
     p.grid.forEach(r => r.forEach(v => { if (v > maxv) maxv = v; }));
     const ps = p.pred_score.map(x => Math.min(x, 5));
-    const ac = m.score ? m.score.map(x => Math.min(x, 5)) : null;
+    const settleScore = m.settle_score || m.score;
+    const ac = settleScore ? settleScore.map(x => Math.min(x, 5)) : null;
     const LAB = ["0", "1", "2", "3", "4", "5+"];
-    let heat = `<div><div class="md-title">各比分概率 · ${esc(hn)} ↓ 行 × ${esc(an)} → 列</div><div class="heat">`;
+    const heatTitle = differsScore(m.score, settleScore)
+      ? (EN ? "Settlement score probabilities" : "各结算比分概率")
+      : (EN ? "Score probabilities" : "各比分概率");
+    let heat = `<div><div class="md-title">${heatTitle} · ${esc(hn)} ↓ 行 × ${esc(an)} → 列</div><div class="heat">`;
     heat += `<span class="hcell hlab"></span>` + LAB.map(c => `<span class="hcell hlab">${c}</span>`).join("");
     p.grid.forEach((row, i) => {
       heat += `<span class="hcell hlab">${LAB[i]}</span>`;
@@ -2211,11 +2240,17 @@
       right += `<div class="md-compare advisor-line"><b>${ADVISOR_NAME} 扰动 ${esc(advisorSummary(p.fable))}</b>${lean}：${esc(p.fable.note)}${p.base ? `<br>引擎原判：主胜 ${pct(p.base.p_home, 0)} / 平 ${pct(p.base.p_draw, 0)} / 客胜 ${pct(p.base.p_away, 0)} → 扰动后如上` : ""}</div>`;
     }
     if (m.score) {
-      const o = m.score[0] > m.score[1] ? esc(hn) + " 胜" : m.score[0] < m.score[1] ? esc(an) + " 胜" : "战平";
+      const settle = m.settle_score || m.score;
+      const finalOutcome = outcomeText(m.score, esc(hn), esc(an));
+      const settleOutcome = outcomeText(settle, esc(hn), esc(an));
+      const advanceText = m.winner ? `${m.score_type === "penalties" ? "点球 " : ""}${esc(zh(m.winner))} 晋级` : "";
+      const resultNote = differsScore(m.score, settle)
+        ? `（终局 ${finalOutcome}，结算 ${settleOutcome}${advanceText ? `，${advanceText}` : ""}）`
+        : `${finalOutcome}${advanceText ? `（${advanceText}）` : ""}`;
       right += `<div class="md-compare">
         赛前方向：<b>${pickLabel(m, p)}</b>（${esc(hn)}胜 ${pct(p.p_home)} / 平 ${pct(p.p_draw)} / ${esc(an)}胜 ${pct(p.p_away)}）<br>
         Top3 比分：<b>${likelyScoresLabel(p)}</b><br>
-        实际结果：<b>${m.score.join("-")}</b> ${o}${m.winner && m.score[0] === m.score[1] ? "（点球 " + esc(zh(m.winner)) + " 晋级）" : ""} · 赛前 AI 给这个比分的概率是 <b>${pct(p.p_actual_score)}</b><br>
+        实际结果：<b>${esc(finalScoreLabel(m).replace(/:/g, "-"))}</b> ${resultNote} · 赛前 AI 给结算比分的概率是 <b>${pct(p.p_actual_score)}</b><br>
         <span class="${m.outcome_hit ? "ok" : "miss"}">${m.outcome_hit ? "✓ 胜平负命中" : "✗ 胜平负未中"}</span>
         <span class="${m.top3_score_hit ? "ok" : "miss"}">${m.top3_score_hit ? "★ Top3 比分命中" : "Top3 比分未中"}</span></div>`;
     }
@@ -2890,7 +2925,7 @@
       const scores = likelyScoresLabel(p);
       const pick = pickLabel(m, p) || "暂无明确方向";
       if (m.score) {
-        return `赛前倾向 ${pick}，Top3 比分给到 ${scores || "暂无"}，实际 ${m.score.join("-")}。`;
+        return `赛前倾向 ${pick}，Top3 比分给到 ${scores || "暂无"}，实际 ${finalScoreLabel(m).replace(/:/g, "-")}。`;
       }
       return `${pick} 是模型第一倾向，可能比分集中在 ${scores || "待更新"}。`;
     }
@@ -2912,7 +2947,7 @@
 
       // 中间视觉中心：已赛出分用大实际比分；未赛 Top3 竖向排列，第1居中、第2在上、第3在下
       const center = m.score
-        ? `<div class="mp-vs is-score">${m.score[0]}:${m.score[1]}</div><div class="mp-pred">终场</div>`
+        ? `<div class="mp-vs is-score">${esc(finalScoreLabel(m))}</div><div class="mp-pred">终场</div>`
         : topScores.length >= 2
           ? `<div class="mp-vs-stack">
               <span class="mp-vs-row minor">${esc(topScores[1].replace("-", ":"))}</span>
@@ -3725,7 +3760,8 @@
               ? (b.payout > 0 ? `<span class="win">+${Math.round(b.payout - b.stake)}</span>`
                               : `<span class="lose">-${b.stake}</span>`)
               : `<span class="pend">可得 ${Math.round(b.stake * betCoefficient(b))}</span>`;
-            const score = b.score_home != null ? ` · ${b.score_home}:${b.score_away}` : "";
+            const scoreText = betScoreLabel(b);
+            const score = scoreText ? ` · ${scoreText}` : "";
             return `<div class="bh-row">
               <div class="bh-main"><span class="bh-m">#${b.match_no} ${esc(zh(b.home))} vs ${esc(zh(b.away))}${score}</span>
                 <span class="pick${pickClass}">${esc(label)} @ ${betCoefficient(b).toFixed(2)}</span>

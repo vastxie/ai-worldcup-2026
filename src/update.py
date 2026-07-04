@@ -185,7 +185,8 @@ def build_schedule(state: dict) -> list[dict]:
     for m in state["matches"]:
         row = {k: m[k] for k in ("match", "round", "stage", "group", "date_utc",
                                  "venue", "home", "away", "slot_home",
-                                 "slot_away", "score", "winner")}
+                                 "slot_away", "score", "settle_score",
+                                 "score_type", "winner")}
         rec = rec_by_match.get(m["match"])
         if rec:  # 已赛：用赛前预测（含市场市场参考时即融合版）
             row["pred"] = {"p_home": rec["p_home"], "p_draw": rec["p_draw"],
