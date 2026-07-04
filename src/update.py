@@ -364,6 +364,15 @@ def _run(sims: int, seed: int | None, do_fetch: bool,
     settled = db.settle_finished_bets()
     if settled:
         print(f"  [bets] 已结算 {settled} 笔预测")
+    reconciled = db.reconcile_settled_bets()
+    if reconciled.get("count"):
+        print("  [bets] 已按结算比分校正 "
+              f"{reconciled['count']} 笔已结预测"
+              f"（净差额 {reconciled['net_delta']}）")
+    reward_reconcile = db.reconcile_daily_agent_rewards()
+    if reward_reconcile.get("count"):
+        print("  [finance] 已校正 "
+              f"{reward_reconcile['count']} 条每日奖励记录")
     finance = db.run_daily_finance_maintenance()
     fin_interest = finance.get("system_interest") or {}
     fin_rewards = finance.get("daily_rewards") or {}

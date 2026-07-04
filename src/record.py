@@ -56,7 +56,7 @@ def main() -> None:
     except (AttributeError, ValueError):
         sys.exit("比分格式: 主队得分-客队得分，如 2-1")
     if gh == ga and args.match > 72 and not args.winner:
-        sys.exit("淘汰赛平局需用 --winner 指明点球胜者（三字码）")
+        sys.exit("淘汰赛平局需用 --winner 指明晋级方（三字码）")
     settle_score = None
     if args.settle_score:
         try:
@@ -71,9 +71,10 @@ def main() -> None:
                            args.winner.upper() if args.winner else None,
                            settle_score=settle_score,
                            score_type=args.score_type)
+    winner_label = "点球胜者" if args.score_type == "penalties" else "晋级方"
     print(f"  已录入第 {args.match} 场 {gh}-{ga}"
           + (f"（结算 {settle_score[0]}-{settle_score[1]}）" if settle_score else "")
-          + (f"（点球胜者 {args.winner.upper()}）" if args.winner else ""))
+          + (f"（{winner_label} {args.winner.upper()}）" if args.winner else ""))
     print("  运行 python3 -m src.update --no-fetch 刷新预测")
 
 

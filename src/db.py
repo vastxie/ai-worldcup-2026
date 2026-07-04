@@ -1453,6 +1453,85 @@ def award_due_daily_agent_rewards(today: str | None = None,
     }
 
 
+def reconcile_daily_agent_rewards(start_date: str | None = None) -> dict:
+    start = (_parse_ymd(start_date)
+             or _parse_ymd(DAILY_AGENT_REWARD_START_DATE)
+             or date.min).isoformat()
+    changes: list[dict] = []
+    with transaction() as conn:
+        rows = conn.execute("""
+            SELECT * FROM daily_agent_rewards
+            WHERE reward_date >= ?
+            ORDER BY reward_date
+        """, (start,)).fetchall()
+        for existing in rows:
+            reward_date = existing["reward_date"]
+            candidates = _daily_agent_reward_candidates(conn, reward_date)
+            expected = candidates[0] if candidates else None
+            old_user = existing["user_id"]
+            old_amount = int(existing["amount"] or 0)
+            if expected:
+                new_user = int(expected["user_id"])
+                new_amount = DAILY_AGENT_REWARD_AMOUNT
+                new_score = int(expected["score"])
+                new_settled = int(expected["settled_bets"])
+                new_status = "awarded"
+            else:
+                new_user = None
+                new_amount = 0
+                new_score = 0
+                new_settled = 0
+                new_status = "skipped"
+
+            same_award = (
+                old_user == new_user
+                and old_amount == new_amount
+                and existing["status"] == new_status
+            )
+            same_stats = (
+                int(existing["score"] or 0) == new_score
+                and int(existing["settled_bets"] or 0) == new_settled
+            )
+            if same_award and same_stats:
+                continue
+
+            ts = now()
+            if old_user and old_amount and not same_award:
+                conn.execute("UPDATE users SET balance = balance - ? WHERE id=?",
+                             (old_amount, old_user))
+                conn.execute("""INSERT INTO wallet_ledger
+                                (user_id, delta, reason, ref_id, ts)
+                                VALUES (?,?,?,?,?)""",
+                             (old_user, -old_amount, "daily_top_bonus",
+                              existing["id"], ts))
+            if new_user and new_amount and not same_award:
+                conn.execute("UPDATE users SET balance = balance + ? WHERE id=?",
+                             (new_amount, new_user))
+                conn.execute("""INSERT INTO wallet_ledger
+                                (user_id, delta, reason, ref_id, ts)
+                                VALUES (?,?,?,?,?)""",
+                             (new_user, new_amount, "daily_top_bonus",
+                              existing["id"], ts))
+            conn.execute("""UPDATE daily_agent_rewards
+                            SET user_id=?, amount=?, score=?,
+                                settled_bets=?, status=?
+                            WHERE id=?""",
+                         (new_user, new_amount, new_score, new_settled,
+                          new_status, existing["id"]))
+            changes.append({
+                "id": existing["id"],
+                "reward_date": reward_date,
+                "old_user_id": old_user,
+                "new_user_id": new_user,
+                "old_amount": old_amount,
+                "new_amount": new_amount,
+                "old_score": int(existing["score"] or 0),
+                "new_score": new_score,
+                "status": new_status,
+            })
+    return {"count": len(changes), "changes": changes}
+
+
 def daily_reward_context(limit: int = 7) -> dict:
     today_s = _today().isoformat()
     conn = connect()
@@ -2071,6 +2150,94 @@ def settle_finished_bets() -> int:
                     conn, b["user_id"], b["id"], b["stake"], payout)
             settled += 1
     return settled
+
+
+def reconcile_settled_bets(match_no_min: int = 73,
+                           reason: str = "settlement_reconcile") -> dict:
+    """按当前结算比分重算已结投注，修正历史 payout 差额。
+
+    这只处理投注表和用户余额。若此前中奖已经触发过积分互助分成，本函数不回滚互助
+    流水；出现这类联动差额时应单独人工复核。
+    """
+    changes: list[dict] = []
+    with transaction() as conn:
+        rows = conn.execute("""
+            SELECT b.*, m.score_home, m.score_away,
+                   m.settle_score_home, m.settle_score_away, m.score_type
+            FROM bets b
+            JOIN matches m ON m.match_no = b.match_no
+            WHERE b.settled = 1 AND b.match_no >= ?
+        """, (match_no_min,)).fetchall()
+        for b in rows:
+            score = _settlement_score(b)
+            if score is None:
+                continue
+            gh, ga = score
+            outcome = ("H" if gh > ga else "A" if ga > gh else "D")
+            expected = round(b["stake"] * b["odds"]) if b["pick"] == outcome else 0
+            current = int(b["payout"] or 0)
+            diff = expected - current
+            if diff == 0:
+                continue
+            conn.execute("UPDATE bets SET payout=? WHERE id=?",
+                         (expected, b["id"]))
+            conn.execute("UPDATE users SET balance = balance + ? WHERE id=?",
+                         (diff, b["user_id"]))
+            conn.execute("""INSERT INTO wallet_ledger
+                            (user_id, delta, reason, ref_id, ts)
+                            VALUES (?,?,?,?,?)""",
+                         (b["user_id"], diff, reason, b["id"], now()))
+            changes.append({
+                "type": "outcome",
+                "id": b["id"],
+                "user_id": b["user_id"],
+                "match_no": b["match_no"],
+                "old_payout": current,
+                "new_payout": expected,
+                "diff": diff,
+            })
+
+        rows = conn.execute("""
+            SELECT b.*, m.score_home, m.score_away,
+                   m.settle_score_home, m.settle_score_away, m.score_type
+            FROM score_bets b
+            JOIN matches m ON m.match_no = b.match_no
+            WHERE b.settled = 1 AND b.match_no >= ?
+        """, (match_no_min,)).fetchall()
+        for b in rows:
+            score = _settlement_score(b)
+            if score is None:
+                continue
+            gh, ga = score
+            hit = (int(b["home_score"]) == gh and int(b["away_score"]) == ga)
+            expected = round(b["stake"] * b["odds"]) if hit else 0
+            current = int(b["payout"] or 0)
+            diff = expected - current
+            if diff == 0:
+                continue
+            conn.execute("UPDATE score_bets SET payout=? WHERE id=?",
+                         (expected, b["id"]))
+            conn.execute("UPDATE users SET balance = balance + ? WHERE id=?",
+                         (diff, b["user_id"]))
+            conn.execute("""INSERT INTO wallet_ledger
+                            (user_id, delta, reason, ref_id, ts)
+                            VALUES (?,?,?,?,?)""",
+                         (b["user_id"], diff, f"score_{reason}",
+                          b["id"], now()))
+            changes.append({
+                "type": "score",
+                "id": b["id"],
+                "user_id": b["user_id"],
+                "match_no": b["match_no"],
+                "old_payout": current,
+                "new_payout": expected,
+                "diff": diff,
+            })
+    return {
+        "changes": changes,
+        "count": len(changes),
+        "net_delta": sum(int(c["diff"]) for c in changes),
+    }
 
 
 def _strategy_tags_from_rows(rows: list) -> list[str]:

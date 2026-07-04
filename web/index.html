@@ -304,6 +304,11 @@
   .m-mid { display: flex; flex-direction: column; align-items: center; gap: 2px;
     text-align: center; font-family: var(--mono); }
   .m-mid .sc { font-size: 23px; font-weight: 600; letter-spacing: .12em; white-space: nowrap; }
+  .m-mid .sc.score-block { display: flex; flex-direction: column; align-items: center; gap: 1px;
+    font-size: inherit; letter-spacing: 0; }
+  .m-mid .score-main { font-size: 23px; font-weight: 600; letter-spacing: .12em; line-height: 1; }
+  .m-mid .score-sub { font-size: 10px; font-weight: 500; letter-spacing: .04em;
+    line-height: 1.15; color: var(--gold); white-space: nowrap; }
   .m-mid .vs { font-size: 12px; color: var(--faint); letter-spacing: .2em; }
   .m-mid .pens { font-size: 10px; color: var(--gold); margin-top: 2px; }
   .m-verdict { display: flex; align-items: center; justify-content: center; flex-wrap: wrap;
@@ -590,6 +595,11 @@
   .mp-center .mp-vs { font-family: var(--mono); font-weight: 600; font-size: 92px; line-height: .9;
     color: var(--ink); letter-spacing: .04em; text-shadow: 0 0 40px rgba(184,245,61,.25); }
   .mp-center .mp-vs.is-score { color: var(--lime); }
+  .mp-center .mp-vs.mp-score-block { display: flex; flex-direction: column; align-items: center;
+    gap: 8px; font-size: inherit; line-height: 1; letter-spacing: 0; }
+  .mp-score-main { font-size: 92px; line-height: .86; letter-spacing: .04em; }
+  .mp-score-sub { font-family: var(--mono); font-size: 18px; line-height: 1; letter-spacing: .14em;
+    color: var(--gold); text-shadow: none; }
   .mp-center .mp-pred { font-family: var(--mono); font-size: 16px; letter-spacing: .18em;
     color: var(--lime); border-top: 1px solid rgba(184,245,61,.4);
     border-bottom: 1px solid rgba(184,245,61,.4); padding: 6px 14px; margin-top: 6px; }
@@ -666,6 +676,8 @@
     .mp-name { font-size: 30px; }
     .mp-fifa { font-size: 9px; }
     .mp-center .mp-vs { font-size: 46px; }
+    .mp-score-main { font-size: 46px; }
+    .mp-score-sub { font-size: 10px; letter-spacing: .08em; }
     .mp-center .mp-pred { font-size: 10px; padding: 4px 8px; }
     .mp-center .mp-pred b { font-size: 12px; }
     .mp-rule { margin: 30px 0 18px; }
@@ -1243,6 +1255,8 @@
     .m-side .flag { font-size: 16px; }
     .m-betline { grid-template-columns: 1fr; gap: 3px; }
     .m-mid .sc { font-size: 17px; }
+    .m-mid .score-main { font-size: 17px; }
+    .m-mid .score-sub { font-size: 9px; }
     .stat-tiles { grid-template-columns: repeat(2, 1fr); gap: 10px; }
     .stile .sv { font-size: 30px; }
     .gcard { padding: 14px 14px 10px; }
@@ -1537,6 +1551,19 @@
     return differsScore(m.score, settle)
       ? `${final} · ${EN ? "90m" : "常规"} ${settle[0]}:${settle[1]}`
       : final;
+  }
+  function settleScoreLabel(m) {
+    if (!m || !differsScore(m.score, m.settle_score)) return "";
+    return `${EN ? "90m" : "常规时间"} ${m.settle_score[0]}:${m.settle_score[1]}`;
+  }
+  function scoreBlockHTML(m, scope = "m") {
+    if (!m || !m.score) return "";
+    const final = `${m.score[0]}:${m.score[1]}`;
+    const settle = settleScoreLabel(m);
+    if (scope === "poster") {
+      return `<div class="mp-vs is-score mp-score-block"><span class="mp-score-main">${esc(final)}</span>${settle ? `<span class="mp-score-sub">${esc(settle)}</span>` : ""}</div>`;
+    }
+    return `<span class="sc score-block"><span class="score-main">${esc(final)}</span>${settle ? `<span class="score-sub">${esc(settle)}</span>` : ""}</span>`;
   }
   function betScoreLabel(b) {
     if (!b || b.score_home == null) return "";
@@ -2104,7 +2131,7 @@
     let mid, verdict = "";
     if (m.score) {
       const pens = m.score[0] === m.score[1] && m.winner ? `<span class="pens">点球 ${esc(zh(m.winner))} 晋级</span>` : "";
-      mid = `<span class="m-mid"><span class="sc">${esc(finalScoreLabel(m))}</span>${pens}</span>`;
+      mid = `<span class="m-mid">${scoreBlockHTML(m)}${pens}</span>`;
       if (m.pred) {
         verdict = `<div class="m-verdict">
           <span class="hit ${m.outcome_hit ? "yes" : "no"}">${m.outcome_hit ? "✓ 胜负命中" : "✗ 胜负未中"}</span>
@@ -2947,7 +2974,7 @@
 
       // 中间视觉中心：已赛出分用大实际比分；未赛 Top3 竖向排列，第1居中、第2在上、第3在下
       const center = m.score
-        ? `<div class="mp-vs is-score">${esc(finalScoreLabel(m))}</div><div class="mp-pred">终场</div>`
+        ? `${scoreBlockHTML(m, "poster")}<div class="mp-pred">终场</div>`
         : topScores.length >= 2
           ? `<div class="mp-vs-stack">
               <span class="mp-vs-row minor">${esc(topScores[1].replace("-", ":"))}</span>

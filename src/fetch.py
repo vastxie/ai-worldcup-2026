@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import re
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -121,6 +122,50 @@ def _score_int(value) -> int | None:
         return None
 
 
+def _goal_minute(detail: dict) -> int | None:
+    clock = detail.get("clock") or {}
+    display = str(clock.get("displayValue") or "")
+    match = re.match(r"\s*(\d+)", display)
+    if match:
+        return int(match.group(1))
+    try:
+        value = float(clock.get("value"))
+    except (TypeError, ValueError):
+        return None
+    return int(value // 60)
+
+
+def _regular_time_score(comp: dict, home_code: str,
+                        away_code: str) -> list[int] | None:
+    """Derive 90-minute score from ESPN scoring events.
+
+    ESPN's knockout final score can be AET/PEN. The payload does not expose a
+    dedicated regular-time score, but each scoring event has a minute and a
+    shootout flag. Count non-shootout goals through minute 90, including 90+.
+    """
+    team_id_to_code = {
+        str((c.get("team") or {}).get("id")): _espn_team_code(c)
+        for c in comp.get("competitors") or []
+    }
+    if not team_id_to_code:
+        return None
+    details = comp.get("details") or []
+    if not details:
+        return None
+    score = {home_code: 0, away_code: 0}
+    for detail in details:
+        if not detail.get("scoringPlay") or detail.get("shootout"):
+            continue
+        minute = _goal_minute(detail)
+        if minute is None or minute > 90:
+            continue
+        code = team_id_to_code.get(str((detail.get("team") or {}).get("id")))
+        if code not in score:
+            continue
+        score[code] += _score_int(detail.get("scoreValue")) or 0
+    return [score[home_code], score[away_code]]
+
+
 def _espn_final(event: dict) -> dict | None:
     comp = (event.get("competitions") or [{}])[0]
     status_type = ((comp.get("status") or {}).get("type") or {})
@@ -153,26 +198,42 @@ def _espn_final(event: dict) -> dict | None:
             if side.get("winner"):
                 winner = _espn_team_code(side)
                 break
+    settle_score = None
+    if score_type in {"final_aet", "penalties"}:
+        settle_score = _regular_time_score(comp, home_code, away_code)
     return {
         "home": home_code,
         "away": away_code,
         "score": [gh, ga],
+        "settle_score": settle_score,
         "score_type": score_type,
         "winner": winner,
         "date_utc": comp.get("date") or event.get("date"),
     }
 
 
-def _espn_dates_to_check(matches: list[dict]) -> list[str]:
+def _espn_dates_to_check(matches: list[dict],
+                         include_scored_knockouts: bool = False) -> list[str]:
     now = datetime.now(timezone.utc)
     start = now - timedelta(hours=72)
     end = now + timedelta(hours=8)
     dates: set[str] = set()
     for m in matches:
-        if not (m.get("home") and m.get("away")) or m.get("score"):
+        if not (m.get("home") and m.get("away")):
+            continue
+        has_score = bool(m.get("score"))
+        is_scored_knockout = (
+            include_scored_knockouts
+            and has_score
+            and m.get("stage") != "group"
+        )
+        if has_score and not is_scored_knockout:
             continue
         dt = _parse_utc(m.get("date_utc"))
-        if dt and start <= dt <= end:
+        in_window = start <= dt <= end if dt else False
+        if is_scored_knockout and dt:
+            in_window = True
+        if dt and in_window:
             dates.add(dt.strftime("%Y%m%d"))
             # ESPN scoreboard uses the event's local broadcast day, so UTC
             # early-morning matches can appear under the previous date.
@@ -200,12 +261,13 @@ def _find_match(matches: list[dict], final: dict) -> dict | None:
 
 
 def sync_espn_scores(matches: list[dict] | None = None,
-                     quiet: bool = False) -> int:
+                     quiet: bool = False,
+                     include_scored_knockouts: bool = False) -> int:
     """用 ESPN 终场状态补齐比分；只采纳 completed 的最终结果。"""
     from . import db
 
     matches = matches or db.load_matches()
-    dates = _espn_dates_to_check(matches)
+    dates = _espn_dates_to_check(matches, include_scored_knockouts)
     if not dates:
         return 0
 
@@ -231,6 +293,7 @@ def sync_espn_scores(matches: list[dict] | None = None,
                 continue
             patched = dict(match)
             patched["score"] = final["score"]
+            patched["settle_score"] = final["settle_score"]
             patched["score_type"] = final["score_type"]
             patched["winner"] = final["winner"]
             patches.append(patched)
@@ -254,15 +317,17 @@ def sync(quiet: bool = False) -> bool:
     except Exception as exc:  # noqa: BLE001 - 网络问题一律降级
         if not quiet:
             print(f"  [fetch] 同步失败（{exc}），沿用数据库现有赛程")
-        return bool(sync_espn_scores(db.load_matches(), quiet))
+        return bool(sync_espn_scores(
+            db.load_matches(), quiet, include_scored_knockouts=True))
 
     matches = sorted((_to_match(r) for r in feed), key=lambda m: m["match"])
     if len(matches) != 104:
         if not quiet:
             print(f"  [fetch] feed 异常：{len(matches)} 场 ≠ 104，忽略本次同步")
-        return bool(sync_espn_scores(db.load_matches(), quiet))
+        return bool(sync_espn_scores(
+            db.load_matches(), quiet, include_scored_knockouts=True))
     db.upsert_matches(matches, source="feed")
-    sync_espn_scores(db.load_matches(), quiet)
+    sync_espn_scores(db.load_matches(), quiet, include_scored_knockouts=True)
     played = sum(1 for m in db.load_matches() if m["score"])
     if not quiet:
         print(f"  [fetch] 已同步 104 场赛程，当前 {played} 场有比分")
