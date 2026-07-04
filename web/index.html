@@ -1546,20 +1546,39 @@
   }
   function finalScoreLabel(m) {
     if (!m || !m.score) return "";
-    const final = `${m.score[0]}:${m.score[1]}`;
+    const final = scoreMainLabel(m);
     const settle = m.settle_score;
     return differsScore(m.score, settle)
       ? `${final} · ${EN ? "90m" : "常规"} ${settle[0]}:${settle[1]}`
       : final;
   }
+  function scoreMainLabel(m) {
+    if (!m || !m.score) return "";
+    if (m.score_type === "penalties" && m.shootout_score) {
+      return `${m.score[0]}(${m.shootout_score[0]}):${m.score[1]}(${m.shootout_score[1]})`;
+    }
+    return `${m.score[0]}:${m.score[1]}`;
+  }
   function settleScoreLabel(m) {
     if (!m || !differsScore(m.score, m.settle_score)) return "";
     return `${EN ? "90m" : "常规时间"} ${m.settle_score[0]}:${m.settle_score[1]}`;
   }
+  function resultSubLabel(m) {
+    if (!m || !m.score) return "";
+    const parts = [];
+    const settle = settleScoreLabel(m);
+    if (settle) parts.push(settle);
+    if (m.winner && m.score_type === "final_aet") {
+      parts.push(`${zh(m.winner)}${EN ? " win AET" : "加时胜"}`);
+    } else if (m.winner && m.score_type === "penalties") {
+      parts.push(`${zh(m.winner)}${EN ? " win on pens" : "点球胜"}`);
+    }
+    return parts.join(" · ");
+  }
   function scoreBlockHTML(m, scope = "m") {
     if (!m || !m.score) return "";
-    const final = `${m.score[0]}:${m.score[1]}`;
-    const settle = settleScoreLabel(m);
+    const final = scoreMainLabel(m);
+    const settle = resultSubLabel(m);
     if (scope === "poster") {
       return `<div class="mp-vs is-score mp-score-block"><span class="mp-score-main">${esc(final)}</span>${settle ? `<span class="mp-score-sub">${esc(settle)}</span>` : ""}</div>`;
     }
@@ -1567,7 +1586,9 @@
   }
   function betScoreLabel(b) {
     if (!b || b.score_home == null) return "";
-    const final = `${b.score_home}:${b.score_away}`;
+    const final = b.score_type === "penalties" && b.shootout_home != null && b.shootout_away != null
+      ? `${b.score_home}(${b.shootout_home}):${b.score_away}(${b.shootout_away})`
+      : `${b.score_home}:${b.score_away}`;
     const hasSettle = b.settle_score_home != null && b.settle_score_away != null;
     return hasSettle && (Number(b.score_home) !== Number(b.settle_score_home)
       || Number(b.score_away) !== Number(b.settle_score_away))
@@ -2130,7 +2151,8 @@
     const advisorTag = p => p.fable ? `<span class="advisor-tag" title="${esc(p.fable.note)}">${ADVISOR_NAME}扰动 ${esc(advisorSummary(p.fable))}</span>` : "";
     let mid, verdict = "";
     if (m.score) {
-      const pens = m.score[0] === m.score[1] && m.winner ? `<span class="pens">点球 ${esc(zh(m.winner))} 晋级</span>` : "";
+      const pens = (!resultSubLabel(m) && m.score[0] === m.score[1] && m.winner)
+        ? `<span class="pens">点球 ${esc(zh(m.winner))} 晋级</span>` : "";
       mid = `<span class="m-mid">${scoreBlockHTML(m)}${pens}</span>`;
       if (m.pred) {
         verdict = `<div class="m-verdict">

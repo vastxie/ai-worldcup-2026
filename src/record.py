@@ -3,6 +3,7 @@
 用法：
     python3 -m src.record 1 2-1              # 第 1 场，主队 2:1 获胜
     python3 -m src.record 89 1-1 --winner FRA  # 点球大战需指明晋级方
+    python3 -m src.record 89 1-1 --winner FRA --score-type penalties --shootout-score 5-4
     python3 -m src.record 86 3-2 --winner ARG --score-type final_aet --settle-score 1-1
     python3 -m src.record --list              # 查看最近已录入
 
@@ -24,6 +25,7 @@ def main() -> None:
     parser.add_argument("score", nargs="?", help="比分，如 2-1（含加时）")
     parser.add_argument("--winner", help="点球胜者三字码（平局时必填）")
     parser.add_argument("--settle-score", help="投注结算比分，如 1-1；淘汰赛加时/点球时填90分钟比分")
+    parser.add_argument("--shootout-score", help="点球大战比分，如 5-4；只用于展示")
     parser.add_argument("--score-type", default="regular",
                         choices=("regular", "final_aet", "penalties"),
                         help="score 的口径：regular / final_aet / penalties")
@@ -66,14 +68,25 @@ def main() -> None:
                 raise ValueError
         except ValueError:
             sys.exit("结算比分格式: 主队得分-客队得分，如 1-1")
+    shootout_score = None
+    if args.shootout_score:
+        try:
+            shootout_score = tuple(
+                int(x) for x in args.shootout_score.replace(":", "-").split("-"))
+            if len(shootout_score) != 2:
+                raise ValueError
+        except ValueError:
+            sys.exit("点球比分格式: 主队得分-客队得分，如 5-4")
 
     db.record_manual_score(args.match, gh, ga,
                            args.winner.upper() if args.winner else None,
                            settle_score=settle_score,
+                           shootout_score=shootout_score,
                            score_type=args.score_type)
     winner_label = "点球胜者" if args.score_type == "penalties" else "晋级方"
     print(f"  已录入第 {args.match} 场 {gh}-{ga}"
           + (f"（结算 {settle_score[0]}-{settle_score[1]}）" if settle_score else "")
+          + (f"（点球 {shootout_score[0]}-{shootout_score[1]}）" if shootout_score else "")
           + (f"（{winner_label} {args.winner.upper()}）" if args.winner else ""))
     print("  运行 python3 -m src.update --no-fetch 刷新预测")
 

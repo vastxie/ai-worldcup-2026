@@ -62,6 +62,8 @@ CREATE TABLE IF NOT EXISTS matches (
   score_away INTEGER,
   settle_score_home INTEGER,          -- 投注/预测战绩结算比分；淘汰赛加时/点球时通常为90分钟比分
   settle_score_away INTEGER,
+  shootout_home INTEGER,
+  shootout_away INTEGER,
   score_type TEXT DEFAULT 'regular',  -- regular / final_aet / penalties
   winner     TEXT,
   source     TEXT DEFAULT 'feed'      -- feed / espn / manual
@@ -448,6 +450,7 @@ def init_db(conn: sqlite3.Connection | None = None) -> None:
         pass
     for col in (
         "settle_score_home INTEGER", "settle_score_away INTEGER",
+        "shootout_home INTEGER", "shootout_away INTEGER",
         "score_type TEXT DEFAULT 'regular'",
     ):
         try:  # 增量迁移：最终比分与投注结算比分分离
@@ -527,6 +530,11 @@ def match_row_to_dict(r: sqlite3.Row) -> dict:
     score = ([r["score_home"], r["score_away"]]
              if r["score_home"] is not None and r["score_away"] is not None
              else None)
+    shootout_score = ([r["shootout_home"], r["shootout_away"]]
+                      if ("shootout_home" in r.keys()
+                          and r["shootout_home"] is not None
+                          and r["shootout_away"] is not None)
+                      else None)
     score_type = r["score_type"] if "score_type" in r.keys() else "regular"
     if ("settle_score_home" in r.keys()
             and r["settle_score_home"] is not None
@@ -542,6 +550,7 @@ def match_row_to_dict(r: sqlite3.Row) -> dict:
         "home": r["home"], "away": r["away"],
         "slot_home": r["slot_home"], "slot_away": r["slot_away"],
         "score": score, "settle_score": settle_score,
+        "shootout_score": shootout_score,
         "score_type": score_type,
         "winner": r["winner"], "source": r["source"],
     }
@@ -562,6 +571,7 @@ def upsert_matches(matches: list[dict], source: str = "feed") -> None:
         for m in matches:
             score = m.get("score") or [None, None]
             settle_score = m.get("settle_score") or [None, None]
+            shootout_score = m.get("shootout_score") or [None, None]
             score_type = m.get("score_type") or (
                 "regular" if score[0] is not None and score[1] is not None else None)
             incoming_has_score = score[0] is not None and score[1] is not None
@@ -585,8 +595,9 @@ def upsert_matches(matches: list[dict], source: str = "feed") -> None:
                 INSERT INTO matches (match_no, round, stage, grp, date_utc,
                     venue, home, away, slot_home, slot_away,
                     score_home, score_away, settle_score_home,
-                    settle_score_away, score_type, winner, source)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    settle_score_away, shootout_home, shootout_away,
+                    score_type, winner, source)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(match_no) DO UPDATE SET
                   round=excluded.round, stage=excluded.stage, grp=excluded.grp,
                   date_utc=excluded.date_utc, venue=excluded.venue,
@@ -597,6 +608,8 @@ def upsert_matches(matches: list[dict], source: str = "feed") -> None:
                   score_away=CASE WHEN ? THEN score_away ELSE excluded.score_away END,
                   settle_score_home=CASE WHEN ? THEN settle_score_home ELSE excluded.settle_score_home END,
                   settle_score_away=CASE WHEN ? THEN settle_score_away ELSE excluded.settle_score_away END,
+                  shootout_home=CASE WHEN ? THEN shootout_home ELSE excluded.shootout_home END,
+                  shootout_away=CASE WHEN ? THEN shootout_away ELSE excluded.shootout_away END,
                   score_type=CASE WHEN ? THEN score_type ELSE excluded.score_type END,
                   winner=CASE WHEN ? THEN winner ELSE excluded.winner END,
                   source=CASE WHEN ? THEN source ELSE excluded.source END
@@ -604,7 +617,9 @@ def upsert_matches(matches: list[dict], source: str = "feed") -> None:
                   m.get("date_utc"), m.get("venue"), m.get("home"),
                   m.get("away"), m.get("slot_home"), m.get("slot_away"),
                   score[0], score[1], settle_score[0], settle_score[1],
+                  shootout_score[0], shootout_score[1],
                   score_type, m.get("winner"), source,
+                  keep_existing_score, keep_existing_score,
                   keep_existing_score, keep_existing_score,
                   keep_existing_score, keep_existing_score,
                   keep_existing_score,
@@ -614,16 +629,21 @@ def upsert_matches(matches: list[dict], source: str = "feed") -> None:
 def record_manual_score(match_no: int, gh: int, ga: int,
                         winner: str | None = None,
                         settle_score: tuple[int, int] | None = None,
+                        shootout_score: tuple[int, int] | None = None,
                         score_type: str = "regular") -> None:
     settle_home = settle_score[0] if settle_score else None
     settle_away = settle_score[1] if settle_score else None
+    shootout_home = shootout_score[0] if shootout_score else None
+    shootout_away = shootout_score[1] if shootout_score else None
     with transaction() as conn:
         conn.execute("""UPDATE matches SET score_home=?, score_away=?,
                         settle_score_home=?, settle_score_away=?,
+                        shootout_home=?, shootout_away=?,
                         score_type=?, winner=COALESCE(?, winner),
                         source='manual'
                         WHERE match_no=?""",
-                     (gh, ga, settle_home, settle_away, score_type,
+                     (gh, ga, settle_home, settle_away,
+                      shootout_home, shootout_away, score_type,
                       winner, match_no))
 
 
@@ -3672,6 +3692,7 @@ def user_bets(user_id: int) -> list[dict]:
                  b.settled_at, b.reason,
                  m.home, m.away, m.date_utc, m.score_home, m.score_away,
                  m.settle_score_home, m.settle_score_away, m.score_type,
+                 m.shootout_home, m.shootout_away,
                  u.kind, u.login, u.name, u.avatar_url, u.model, u.persona
           FROM bets b
           JOIN matches m ON m.match_no = b.match_no
@@ -3685,6 +3706,7 @@ def user_bets(user_id: int) -> list[dict]:
                  b.settled_at, b.reason,
                  m.home, m.away, m.date_utc, m.score_home, m.score_away,
                  m.settle_score_home, m.settle_score_away, m.score_type,
+                 m.shootout_home, m.shootout_away,
                  u.kind, u.login, u.name, u.avatar_url, u.model, u.persona
           FROM score_bets b
           JOIN matches m ON m.match_no = b.match_no

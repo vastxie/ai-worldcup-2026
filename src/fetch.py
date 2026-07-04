@@ -166,6 +166,37 @@ def _regular_time_score(comp: dict, home_code: str,
     return [score[home_code], score[away_code]]
 
 
+def _shootout_score(comp: dict, home_code: str, away_code: str,
+                    winner: str | None) -> list[int] | None:
+    team_id_to_code = {
+        str((c.get("team") or {}).get("id")): _espn_team_code(c)
+        for c in comp.get("competitors") or []
+    }
+    score = {home_code: 0, away_code: 0}
+    saw_shootout = False
+    for detail in comp.get("details") or []:
+        if not detail.get("shootout") or not detail.get("scoringPlay"):
+            continue
+        code = team_id_to_code.get(str((detail.get("team") or {}).get("id")))
+        if code not in score:
+            continue
+        score[code] += _score_int(detail.get("scoreValue")) or 0
+        saw_shootout = True
+    if saw_shootout:
+        return [score[home_code], score[away_code]]
+
+    note_text = " ".join(
+        str(note.get("text") or note.get("headline") or "")
+        for note in comp.get("notes") or []
+    )
+    match = re.search(r"(\d+)\s*-\s*(\d+)\s+on penalties", note_text, re.I)
+    if not match or winner not in {home_code, away_code}:
+        return None
+    win_score, lose_score = int(match.group(1)), int(match.group(2))
+    return ([win_score, lose_score] if winner == home_code
+            else [lose_score, win_score])
+
+
 def _espn_final(event: dict) -> dict | None:
     comp = (event.get("competitions") or [{}])[0]
     status_type = ((comp.get("status") or {}).get("type") or {})
@@ -201,11 +232,15 @@ def _espn_final(event: dict) -> dict | None:
     settle_score = None
     if score_type in {"final_aet", "penalties"}:
         settle_score = _regular_time_score(comp, home_code, away_code)
+    shootout_score = None
+    if score_type == "penalties":
+        shootout_score = _shootout_score(comp, home_code, away_code, winner)
     return {
         "home": home_code,
         "away": away_code,
         "score": [gh, ga],
         "settle_score": settle_score,
+        "shootout_score": shootout_score,
         "score_type": score_type,
         "winner": winner,
         "date_utc": comp.get("date") or event.get("date"),
@@ -294,6 +329,7 @@ def sync_espn_scores(matches: list[dict] | None = None,
             patched = dict(match)
             patched["score"] = final["score"]
             patched["settle_score"] = final["settle_score"]
+            patched["shootout_score"] = final["shootout_score"]
             patched["score_type"] = final["score_type"]
             patched["winner"] = final["winner"]
             patches.append(patched)
