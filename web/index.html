@@ -837,6 +837,8 @@
     color: var(--bg); background: var(--lime); border: none; border-radius: 3px;
     padding: 8px 18px; cursor: pointer; }
   .bet-submit:disabled { opacity: .5; cursor: not-allowed; }
+  .bet-rule-note { margin: -2px 0 8px; color: var(--gold); font-family: var(--mono);
+    font-size: 11px; line-height: 1.6; }
 
   /* 预测确认弹窗 */
   .bet-modal { position: fixed; inset: 0; background: rgba(4,10,6,.72); z-index: 100;
@@ -1427,7 +1429,7 @@
   </svg>
 </button>
 
-<script src="data.js?v=20260704-penalty-score"></script>
+<script src="data.js?v=20260704-settle-note"></script>
 <script src="reports.js"></script>
 <script src="blurbs.js"></script>
 <script src="intel.js"></script>
@@ -3925,6 +3927,9 @@
       const coefficients = o.coefficients || o.odds || {};
       const scoreOdds = o.score_coefficients || o.score_odds || {};
       const maxScore = Number(o.score_max_goals ?? 6);
+      const settleNote = m.stage !== "group"
+        ? (EN ? "Knockout picks settle on the 90-minute score." : "淘汰赛预测按90分钟常规时间结算")
+        : "";
       const scoreCells = [];
       for (let h = 0; h <= maxScore; h++) {
         for (let a = 0; a <= maxScore; a++) {
@@ -3938,6 +3943,7 @@
       const box = document.createElement("div");
       box.className = "bet-box";
       box.innerHTML = `<div class="md-title">提交预测 · 虚拟积分 · <span class="bet-ddl">距开球截止还有 ${fmtLeft()}</span></div>
+        ${settleNote ? `<div class="bet-rule-note">${settleNote}</div>` : ""}
         <div class="bet-odds">${["H", "D", "A"].map(k =>
           `<button class="odds-btn" data-k="${k}"><span class="ol">${names[k]}</span><span class="ov">${coefficients[k].toFixed(2)}</span></button>`).join("")}</div>
         ${scoreCells.length ? `<button class="score-bet-toggle" type="button"><span>比分挑战</span><b>全比分表 · 0-0 到 ${maxScore}-${maxScore}</b></button>

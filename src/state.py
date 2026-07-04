@@ -451,6 +451,7 @@ def build_state(write_side_effects: bool = True) -> dict:
                 "match": m["match"], "stage": m["stage"], "date_utc": m["date_utc"],
                 "home": m["home"], "away": m["away"], "score": m["score"],
                 "settle_score": actual_score,
+                "shootout_score": m.get("shootout_score"),
                 "score_type": m.get("score_type") or "regular",
                 "winner": m["winner"],
                 "p_home": round(pred["p_win"], 4),
