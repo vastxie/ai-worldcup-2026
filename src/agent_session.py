@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import random
 import re
 import sqlite3
@@ -31,7 +32,16 @@ from .gateway import Gateway
 from .model import exact_score_prob
 
 ROOT = Path(__file__).resolve().parent.parent
-AGENT_VISIBLE_HOURS = 24
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+AGENT_VISIBLE_HOURS = _env_int("AGENT_VISIBLE_HOURS", 72)
 AGENT_FOCUS_PAST_HOURS = 12
 OUTCOME_BOOK_MARGIN = 0.045
 FALLBACK_BOOK_MARGIN = 0.075
