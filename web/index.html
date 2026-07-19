@@ -465,7 +465,16 @@
   .rc-more { margin-left: auto; font-family: var(--mono); font-size: 11px;
     color: var(--dim); text-decoration: none; }
   .rc-more:hover { color: var(--lime); }
-  .rc-body { font-size: 14.5px; line-height: 2.05; color: var(--ink); }
+  .rc-body { max-width: 980px; margin-inline: auto; font-size: 15px; line-height: 1.95; color: var(--ink); }
+  .rc-body > p, .rc-section, .rc-section-copy { margin: 0; }
+  .rc-body > p + p, .rc-body > p + .rc-section,
+  .rc-section + .rc-section, .rc-section + p { margin-top: 1.45em; }
+  .rc-lead { font-family: var(--disp); font-size: 21px; line-height: 1.45;
+    font-weight: 700; color: var(--white); }
+  .rc-section-title { margin: 0 0 .55em; font-family: var(--mono); font-size: 12px;
+    line-height: 1.5; letter-spacing: .08em; color: var(--gold); }
+  .rc-section-list { margin: .15em 0 0; padding-left: 1.55em; display: grid; gap: .52em; }
+  .rc-section-list li { padding-left: .25em; }
   .rc-summary { font-size: 14px; line-height: 1.85; color: var(--ink); }
   .report-card.collapsed-report .rc-body { display: none; }
   .report-card.open-report .rc-body { display: block; }
@@ -1233,6 +1242,9 @@
     .rc-head { align-items: flex-start; flex-wrap: wrap; gap: 8px; }
     .rc-more { margin-left: 0; }
     .rc-body { font-size: 13.5px; line-height: 1.9; }
+    .rc-lead { font-size: 18px; }
+    .rc-section-title { font-size: 11.5px; }
+    .rc-section-list { padding-left: 1.35em; gap: .65em; }
     .rc-summary { font-size: 13.5px; line-height: 1.8; }
     .intel-card { padding: 14px 14px 12px; }
     .intel-title { font-size: 14px; }
@@ -1743,6 +1755,26 @@
       const out = clean.slice(0, n);
       return out + (out.length < clean.length ? "…" : "");
     };
+    const reportBody = text => {
+      const blocks = String(text || "").trim().split(/\n\s*\n+/).filter(Boolean);
+      return blocks.map((raw, index) => {
+        const block = raw.trim();
+        const section = block.match(/^【([^】]+)】\s*([\s\S]*)$/);
+        if (section) {
+          const title = esc(section[1]);
+          const content = section[2].trim();
+          const numbered = content.match(/^1\.\s/) && content.split(/；(?=\d+\.\s)/);
+          const copy = numbered
+            ? `<ol class="rc-section-list">${numbered.map(item =>
+                `<li>${esc(item.replace(/^\d+\.\s*/, ""))}</li>`).join("")}</ol>`
+            : `<p class="rc-section-copy">${esc(content).replace(/\n/g, "<br>")}</p>`;
+          return `<section class="rc-section"><h3 class="rc-section-title">${title}</h3>${copy}</section>`;
+        }
+        const lead = index === 0 && blocks.length > 1 && block.length <= 32
+          && !/[。！？]/.test(block);
+        return `<p${lead ? ' class="rc-lead"' : ""}>${esc(block).replace(/\n/g, "<br>")}</p>`;
+      }).join("");
+    };
     const card = (r, mode, open = false) => {
       const home = mode === "home";
       return `
@@ -1755,7 +1787,7 @@
         <div class="rc-summary">${esc(summary(r.report, home ? 120 : 132))}</div>
         ${home
           ? '<div class="rc-actions"><a class="rc-action-link" href="#reports">阅读全文 →</a></div>'
-          : `<div class="rc-body">${esc(r.report)}</div><button class="rc-read" type="button" aria-expanded="${open ? "true" : "false"}">${open ? "收起 ↑" : "阅读全文 ↓"}</button>`}
+          : `<div class="rc-body">${reportBody(r.report)}</div><button class="rc-read" type="button" aria-expanded="${open ? "true" : "false"}">${open ? "收起 ↑" : "阅读全文 ↓"}</button>`}
       </div>`;
     };
     if (R.length) {
