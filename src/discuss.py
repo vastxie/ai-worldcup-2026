@@ -12,6 +12,7 @@
 用法：
   python3 -m src.discuss                # 战报圆桌（随机 5~15 轮）
   python3 -m src.discuss --rounds 8     # 战报圆桌，指定轮数
+  python3 -m src.discuss --closing --rounds 50  # 全员世界杯收官圆桌
   python3 -m src.discuss --match 4      # 第 4 场单场讨论
   python3 -m src.discuss --soon         # 给所有临近开赛/刚结束且有 AI 预测的场各开一轮
 """
@@ -50,6 +51,26 @@ SYSTEM_DISCUSS = """你是「{name}」，2026 世界杯 AI 竞技场圆桌讨论
 }}
 原则：没有新观点就 pass，附和不如沉默；被人点名/反驳了可以回击；
 立场冲突、互相拆台、立 flag 和打脸都是圆桌的价值。"""
+
+SYSTEM_CLOSING = """你是「{name}」，参加 2026 世界杯收官圆桌。
+表达风格：{persona}
+
+世界杯已经结束。本轮只讨论这届世界杯本身：决赛进程、冠军之路、关键球员、
+战术变化、黑马与遗憾、最难忘的比赛，以及这届 48 队世界杯留下了什么。
+不要谈投注、赔率、积分、回报或竞技场排名，也不要把发言写成赛前预测。
+
+你会看到赛事事实、最新总结战报、情报索引和当前讨论区。可以提出自己的独立判断，
+也可以直接回复、赞同或反驳其他 AI。每次只抓一个重点，不要面面俱到或复读材料。
+
+只输出一个 JSON 对象（不要其他文字、不要代码块）：
+{{
+  "action": "comment" | "reply",
+  "reply_to": 回复目标评论 id（action=reply 时必填）,
+  "text": "发言内容（50~140 字，观点明确、自然、有具体依据）",
+  "likes": [顺手点赞的评论 id，最多 2 个],
+  "note": "值得留存的世界杯观察（可选）"
+}}
+这是全员收官轮，每位嘉宾都应留下观点，不要 pass。"""
 
 SYSTEM_MATCH = """你是「{name}」，2026 世界杯 AI 竞技场圆桌讨论会的常驻嘉宾。
 人设：{persona}
@@ -186,6 +207,167 @@ def run_session(rounds: int | None = None) -> None:
         except Exception as exc:  # noqa: BLE001
             print(f"  [{i+1}/{n}] {agent['name']}: 失败（{str(exc)[:120]}）")
         time.sleep(1)
+
+
+def _closing_persona(agent_cfg: dict) -> str:
+    persona = str(agent_cfg.get("persona") or "").strip()
+    if persona:
+        return persona
+    return "本色组：不扮演角色，保持冷静、简洁和事实导向，直接给出足球判断。"
+
+
+def _closing_snapshot() -> dict:
+    matches = db.load_matches()
+    data = _load_results() or {}
+    names = {t["code"]: t.get("name_zh", t["code"])
+             for t in data.get("teams", [])}
+
+    def one(match_no: int) -> dict | None:
+        row = next((m for m in matches if m["match"] == match_no), None)
+        if not row:
+            return None
+        return {
+            "场次": match_no,
+            "对阵": f"{names.get(row['home'], row['home'])} vs "
+                    f"{names.get(row['away'], row['away'])}",
+            "终场比分": row.get("score"),
+            "90分钟比分": row.get("settle_score"),
+            "比赛口径": row.get("score_type"),
+            "胜者": names.get(row.get("winner"), row.get("winner")),
+        }
+
+    played = [m for m in matches if m.get("score") is not None]
+    total_goals = sum(sum(m["score"]) for m in played)
+    final = one(104)
+    return {
+        "已完成场次": len(played),
+        "赛事总进球": total_goals,
+        "冠军": (final or {}).get("胜者"),
+        "决赛": final,
+        "季军赛": one(103),
+    }
+
+
+def run_closing_session(rounds: int = 50) -> None:
+    """世界杯收官圆桌：全员先各发言一次，余下轮次随机互动。"""
+    db.init_db()
+    arena_cfg = _load_cfg()
+    pool = list(arena_cfg.get("agents", []))
+    if not pool:
+        print("  [discuss] 没有 AI 选手，散会")
+        return
+    reports = db.load_reports()
+    if not reports:
+        print("  [discuss] 还没有战报，散会")
+        return
+
+    n = max(int(rounds or 50), len(pool))
+    guaranteed = pool[:]
+    random.shuffle(guaranteed)
+    successful: set[str] = set()
+    attempts: dict[str, int] = {a["id"]: 0 for a in pool}
+    gw = Gateway()
+    recent = reports[-3:]
+    snapshot = _closing_snapshot()
+    prev = None
+    print(f"  [discuss] 世界杯收官圆桌开席：{n} 轮，AI {len(pool)} 位")
+
+    for i in range(n):
+        if guaranteed:
+            agent = guaranteed.pop()
+        else:
+            missing = [a for a in pool
+                       if a["id"] not in successful
+                       and attempts[a["id"]] < 3
+                       and a["id"] != prev]
+            candidates = missing or [a for a in pool if a["id"] != prev] or pool
+            agent = random.choice(candidates)
+        prev = agent["id"]
+        attempts[agent["id"]] += 1
+        try:
+            posted = speak_closing(
+                agent, gw, recent, snapshot, i + 1, n,
+                required=agent["id"] not in successful)
+            if posted:
+                successful.add(agent["id"])
+        except Exception as exc:  # noqa: BLE001
+            print(f"  [{i+1}/{n}] {agent['name']}: 失败（{str(exc)[:120]}）")
+        time.sleep(1)
+
+    missing_names = [a["name"] for a in pool if a["id"] not in successful]
+    print(f"  [discuss] 收官圆桌完成：{len(successful)}/{len(pool)} 位已发言"
+          + (f"；未成功：{', '.join(missing_names)}" if missing_names else ""))
+
+
+def speak_closing(agent_cfg: dict, gw: Gateway, reports: list[dict],
+                  snapshot: dict, idx: int, total: int,
+                  required: bool = False) -> bool:
+    gw_model = gw.models.get(agent_cfg["model"], {})
+    user_row = db.ensure_agent_user(
+        agent_cfg["id"], agent_cfg["name"],
+        gw_model.get("model", agent_cfg["model"]),
+        agent_cfg.get("persona", ""))
+    me = db.get_user(user_row["id"])
+    system = SYSTEM_CLOSING.format(
+        name=agent_cfg["name"], persona=_closing_persona(agent_cfg))
+
+    act: dict = {}
+    for attempt in range(2 if required else 1):
+        tree = comment_tree(report_only=True)[-40:]
+        user_msg = json.dumps({
+            "赛事事实": snapshot,
+            "收官战报": [
+                {"期数": r["no"], "日期": r["date"], "正文": r["report"]}
+                for r in reports
+            ],
+            "情报区最新索引": [
+                {"id": it["id"], "日期": it["date"], "标题": it["title"]}
+                for it in db.intel_index(12)
+            ],
+            "当前收官讨论": tree,
+            "本轮要求": ("必须留下一个具体的世界杯观点，不要跳过"
+                         if required else "可发新观点，也可回复其他 AI"),
+        }, ensure_ascii=False)
+        out = gw.chat(agent_cfg["model"], system, user_msg,
+                      agent=agent_cfg["id"])
+        act = _parse_json(out["text"])
+        if str(act.get("text") or "").strip():
+            break
+
+    text = str(act.get("text") or "").strip()
+    if not text:
+        print(f"  [{idx}/{total}] {agent_cfg['name']}: 未形成观点")
+        return False
+
+    tree = comment_tree(report_only=True)[-40:]
+    valid_ids = {p["id"] for p in tree}
+    reply_to = None
+    if str(act.get("action") or "comment").lower() == "reply":
+        try:
+            candidate = int(act.get("reply_to"))
+            if candidate in valid_ids:
+                reply_to = candidate
+        except (TypeError, ValueError):
+            pass
+    for pid in (act.get("likes") or [])[:2]:
+        try:
+            if int(pid) in valid_ids:
+                db.toggle_like(int(pid), me["id"])
+        except (ValueError, TypeError):
+            pass
+
+    quick_note = str(act.get("note") or "").strip()
+    if quick_note:
+        db.agent_note_add(me["id"], "2026 世界杯收官观察", quick_note[:500])
+
+    report_no = reports[-1]["no"]
+    if reply_to:
+        parent = next((p for p in tree if p["id"] == reply_to), None)
+        report_no = (parent or {}).get("所属战报") or report_no
+    db.agent_post_add(me["id"], report_no, text[:300], reply_to)
+    tag = f"回复#{reply_to}" if reply_to else f"评论第{report_no}期"
+    print(f"  [{idx}/{total}] {agent_cfg['name']}: {tag} | {text[:40]}")
+    return True
 
 
 def speak(agent_cfg: dict, gw: Gateway, reports: list[dict],
@@ -358,10 +540,14 @@ def main() -> None:
     parser.add_argument("--rounds", type=int, default=None,
                         help="发言机会数（战报圆桌默认随机 5~15，单场默认 3~6）")
     parser.add_argument("--match", type=int, default=None, help="只讨论某一场")
+    parser.add_argument("--closing", action="store_true",
+                        help="全员参加世界杯收官圆桌，主题不含预测和积分")
     parser.add_argument("--soon", action="store_true",
                         help="给所有临近开赛/刚结束且有 AI 预测的场各开一轮")
     args = parser.parse_args()
-    if args.match:
+    if args.closing:
+        run_closing_session(args.rounds or 50)
+    elif args.match:
         run_match_session(args.match, args.rounds)
     elif args.soon:
         db.init_db()
