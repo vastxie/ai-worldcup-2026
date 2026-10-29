@@ -1,0 +1,13 @@
+{
+  "name": "ai-worldcup-static-archive",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "build": "python3 tools/build_static_archive.py",
+    "test": "node --test tests/archive.test.cjs",
+    "deploy": "npm run build && wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "4.155.0"
+  }
+}

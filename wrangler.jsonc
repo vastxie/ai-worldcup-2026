@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ai-worldcup-archive",
+  "compatibility_date": "2026-10-29",
+  "workers_dev": true,
+  "routes": [
+    { "pattern": "worldcup.lightai.io", "custom_domain": true },
+    { "pattern": "wc.lightai.io", "custom_domain": true }
+  ],
+  "assets": {
+    "directory": "./dist-static"
+  }
+}

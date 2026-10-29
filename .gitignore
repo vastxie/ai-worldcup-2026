@@ -25,3 +25,9 @@ data/worldcup.db
 data/worldcup.db-*
 backups/
 .venv/
+
+# Static archive local build / tooling; only public frozen data is committed.
+node_modules/
+.wrangler/
+dist-static/
+*.tmp
